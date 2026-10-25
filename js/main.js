@@ -1,0 +1,1514 @@
+/* Liquid Glass Lab — 페이지 인터랙션 */
+(() => {
+  'use strict';
+
+  const LG = window.LiquidGlass;
+  const root = document.documentElement;
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const reduced = () => root.classList.contains('reduce-motion');
+
+  function parseOpts(str) {
+    const o = {};
+    (str || '').split(';').forEach((pair) => {
+      const [k, v] = pair.split(':');
+      if (k && v !== undefined) o[k.trim()] = parseFloat(v);
+    });
+    return o;
+  }
+
+  /* ---------- 공용 도구 ---------- */
+
+  // 포인터 드래그. threshold(px)를 넘기 전에는 move를 부르지 않으므로 탭과 드래그를 구분할 수 있습니다.
+  function drag(el, { threshold = 0, start, move, end }) {
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !e.isPrimary) return;
+      const ctx = start ? start(e) : {};
+      if (ctx === false) return;
+      const id = e.pointerId;
+      const sx = e.clientX;
+      const sy = e.clientY;
+      let lx = sx;
+      let ly = sy;
+      let lt = performance.now();
+      let vx = 0;
+      let vy = 0;
+      let active = threshold === 0;
+
+      const onMove = (ev) => {
+        if (ev.pointerId !== id) return;
+        const dx = ev.clientX - sx;
+        const dy = ev.clientY - sy;
+        if (!active) {
+          if (Math.hypot(dx, dy) < threshold) return;
+          active = true;
+        }
+        const now = performance.now();
+        const dt = Math.max(1, now - lt);
+        vx = vx * 0.5 + ((ev.clientX - lx) / dt) * 0.5;
+        vy = vy * 0.5 + ((ev.clientY - ly) / dt) * 0.5;
+        lx = ev.clientX;
+        ly = ev.clientY;
+        lt = now;
+        if (move) move({ dx, dy, vx, vy, ev, ctx });
+      };
+      const onUp = (ev) => {
+        if (ev.pointerId !== id) return;
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        if (performance.now() - lt > 90) { vx = 0; vy = 0; }
+        if (end) end({ active, vx, vy, ev, ctx, dx: ev.clientX - sx, dy: ev.clientY - sy });
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  }
+
+  // 무대 안에서 끌거나 화살표 키로 옮길 수 있는 요소
+  function movable(el, stage, onMove) {
+    const pos = { x: 0, y: 0 };
+    const place = () => {
+      pos.x = clamp(pos.x, 0, Math.max(0, stage.clientWidth - el.offsetWidth));
+      pos.y = clamp(pos.y, 0, Math.max(0, stage.clientHeight - el.offsetHeight));
+      el.style.transform = `translate3d(${pos.x.toFixed(1)}px, ${pos.y.toFixed(1)}px, 0)`;
+      if (onMove) onMove(pos);
+    };
+    drag(el, {
+      start() {
+        el.classList.add('is-dragging');
+        return { x: pos.x, y: pos.y };
+      },
+      move({ dx, dy, ctx }) {
+        pos.x = ctx.x + dx;
+        pos.y = ctx.y + dy;
+        place();
+      },
+      end() { el.classList.remove('is-dragging'); },
+    });
+    el.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 60 : 20;
+      const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      pos.x += d[0];
+      pos.y += d[1];
+      place();
+    });
+    return {
+      pos,
+      place,
+      center(fx = 0.5, fy = 0.5) {
+        pos.x = (stage.clientWidth - el.offsetWidth) * fx;
+        pos.y = (stage.clientHeight - el.offsetHeight) * fy;
+        place();
+      },
+    };
+  }
+
+  function syncRange(input) {
+    const min = +input.min || 0;
+    const max = +input.max || 100;
+    input.style.setProperty('--p', (((input.value - min) / (max - min)) * 100).toFixed(2) + '%');
+  }
+
+  function chipGroup(buttons, onSelect) {
+    buttons.forEach((b) => {
+      b.addEventListener('click', () => {
+        buttons.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        onSelect(b);
+      });
+    });
+  }
+
+  function pressWhere(buttons, pred) {
+    buttons.forEach((b) => b.setAttribute('aria-pressed', String(pred(b))));
+  }
+
+  const BG_TEMPLATES = {
+    text: '<div class="bgtext"><p>리퀴드 글래스</p><p>LIQUID GLASS</p><p>빛을 휘게 하는</p><p>HTML · CSS · SVG</p><p>굴절 반사 탄성</p><p>LENS 렌즈 LENS</p><p>유리 너머의 글자</p></div>',
+    scene: '<div class="scene-sun"></div><div class="scene-mtn scene-mtn--far"></div><div class="scene-mtn scene-mtn--near"></div><div class="scene-sea"></div>',
+  };
+
+  function setBg(layer, name) {
+    Array.from(layer.classList).filter((c) => c.startsWith('bg-')).forEach((c) => layer.classList.remove(c));
+    layer.classList.add('bg-' + name);
+    layer.innerHTML = BG_TEMPLATES[name] || '';
+    layer.dataset.bg = name;
+  }
+
+  let toastTimer = 0;
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.hidden = false;
+    t.style.animation = 'none';
+    void t.offsetWidth;
+    t.style.animation = '';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  }
+
+  // 반경·크기 전환이 끝나면 변위 맵을 그 최종 모양으로 다시 그립니다
+  function refreshOnShapeEnd(el) {
+    el.addEventListener('transitionend', (e) => {
+      if (e.target === el && /radius|width|height/.test(e.propertyName) && el.__glass) el.__glass.schedule();
+    });
+  }
+
+  /* ---------- 접근성 설정 ---------- */
+  function initA11y() {
+    const MQ = {
+      'reduce-transparency': '(prefers-reduced-transparency: reduce)',
+      'reduce-motion': '(prefers-reduced-motion: reduce)',
+      'more-contrast': '(prefers-contrast: more)',
+    };
+    $$('[data-a11y]').forEach((sw) => {
+      const cls = sw.dataset.a11y;
+      const set = (on) => {
+        root.classList.toggle(cls, on);
+        sw.setAttribute('aria-checked', String(on));
+        document.dispatchEvent(new CustomEvent('a11ychange', { detail: { cls, on } }));
+      };
+      let initial = false;
+      try { initial = matchMedia(MQ[cls]).matches; } catch (e) { initial = false; }
+      root.classList.toggle(cls, initial);
+      sw.setAttribute('aria-checked', String(initial));
+      sw.addEventListener('click', () => set(sw.getAttribute('aria-checked') !== 'true'));
+    });
+  }
+
+  /* ---------- 유리 연결 · 동적 조명 ---------- */
+  function initGlass() {
+    $$('.bg[data-bg]').forEach((layer) => setBg(layer, layer.dataset.bg));
+    $$('[data-refract]').forEach((el) => LG.attach(el, parseOpts(el.dataset.refract)));
+
+    const lit = $$('[data-lit]');
+    let raf = 0;
+    let px = -1e4;
+    let py = -1e4;
+    const update = () => {
+      raf = 0;
+      for (const el of lit) {
+        const r = el.getBoundingClientRect();
+        if (r.bottom < -200 || r.top > innerHeight + 200) continue;
+        const dx = px - (r.left + r.width / 2);
+        const dy = py - (r.top + r.height / 2);
+        el.style.setProperty('--lx', clamp(px - r.left, -60, r.width + 60).toFixed(0) + 'px');
+        el.style.setProperty('--ly', clamp(py - r.top, -60, r.height + 60).toFixed(0) + 'px');
+        el.style.setProperty('--g-angle', ((Math.atan2(dx, -dy) * 180) / Math.PI).toFixed(1) + 'deg');
+      }
+    };
+    window.addEventListener('pointermove', (e) => {
+      px = e.clientX;
+      py = e.clientY;
+      if (!raf) raf = requestAnimationFrame(update);
+    }, { passive: true });
+  }
+
+  /* ---------- 로컬 내비게이션 ---------- */
+  function initNav() {
+    const nav = $('#localnav');
+    const btn = $('.localnav__chevron', nav);
+    const links = $$('.localnav__links a', nav);
+    const close = () => {
+      nav.classList.remove('is-open');
+      btn.setAttribute('aria-expanded', 'false');
+      btn.setAttribute('aria-label', '메뉴 열기');
+    };
+    btn.addEventListener('click', () => {
+      const open = !nav.classList.contains('is-open');
+      nav.classList.toggle('is-open', open);
+      btn.setAttribute('aria-expanded', String(open));
+      btn.setAttribute('aria-label', open ? '메뉴 닫기' : '메뉴 열기');
+    });
+    links.forEach((a) => a.addEventListener('click', close));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+
+    const byId = new Map(links.map((a) => [a.getAttribute('href').slice(1), a]));
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        if (en.isIntersecting) links.forEach((a) => a.classList.toggle('is-current', a === byId.get(en.target.id)));
+      });
+    }, { rootMargin: '-45% 0px -50% 0px' });
+    byId.forEach((a, id) => {
+      const s = document.getElementById(id);
+      if (s) io.observe(s);
+    });
+  }
+
+  /* ---------- 히어로: 끌 수 있는 렌즈 ---------- */
+  function initHero() {
+    const stage = $('#hero-stage');
+    const lens = $('#hero-lens');
+    const hint = $('#hero-hint');
+    const tagline = $('.hero__tagline', stage);
+    LG.attach(lens, { refraction: 96, bezel: 36, blur: 0.4, dispersion: 0.55, saturation: 1.35 });
+    refreshOnShapeEnd(lens);
+
+    const SHAPES = { capsule: [300, 150, 75], circle: [210, 210, 105], card: [330, 210, 46] };
+    let shape = 'capsule';
+    let size = { w: 300, h: 150 };
+    let x = 0;
+    let y = 0;
+    let vx = 0;
+    let vy = 0;
+    let dvx = 0;
+    let dvy = 0;
+    let stretch = 0;
+    let angle = 0;
+    let dragging = false;
+    let touched = false;
+    let inView = true;
+    let raf = 0;
+    let lastT = 0;
+    let home = { x: 0, y: 0 };
+
+    const k = () => clamp(stage.clientWidth / 1100, 0.58, 1);
+    const maxX = () => Math.max(0, stage.clientWidth - size.w);
+    const maxY = () => Math.max(0, stage.clientHeight - size.h);
+
+    function applyShape() {
+      const [w, h, r] = SHAPES[shape];
+      const s = k();
+      size = { w: Math.round(w * s), h: Math.round(h * s) };
+      lens.style.setProperty('--lw', size.w + 'px');
+      lens.style.setProperty('--lh', size.h + 'px');
+      lens.style.setProperty('--lr', Math.round(r * s) + 'px');
+    }
+    function computeHome() {
+      const sr = stage.getBoundingClientRect();
+      const tr = tagline.getBoundingClientRect();
+      home = {
+        x: clamp(tr.left - sr.left + tr.width / 2 - size.w / 2, 0, maxX()),
+        y: clamp(tr.top - sr.top + tr.height / 2 - size.h / 2, 0, maxY()),
+      };
+    }
+    function render() {
+      const sx = 1 + stretch;
+      const sy = 1 - stretch * 0.55;
+      lens.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) rotate(${angle.toFixed(3)}rad) scale(${sx.toFixed(3)}, ${sy.toFixed(3)}) rotate(${(-angle).toFixed(3)}rad)`;
+    }
+    function towardStretch(svx, svy) {
+      const speed = Math.hypot(svx, svy);
+      const target = clamp(speed * 0.085, 0, 0.2);
+      stretch += (target - stretch) * 0.22;
+      if (speed > 0.05) angle = Math.atan2(svy, svx);
+    }
+    function tick(t) {
+      raf = 0;
+      const dt = lastT ? Math.min(48, t - lastT) : 16;
+      lastT = t;
+      let keep = false;
+      if (dragging) {
+        towardStretch(dvx, dvy);
+        dvx *= 0.82;
+        dvy *= 0.82;
+        keep = true;
+      } else if (!touched && !reduced()) {
+        const s = t / 1000;
+        const tx = home.x + Math.sin(s * 0.55) * Math.min(150, stage.clientWidth * 0.16);
+        const ty = home.y + Math.sin(s * 1.1) * 12;
+        const nx = x + (tx - x) * 0.05;
+        const ny = y + (ty - y) * 0.05;
+        towardStretch((nx - x) / dt, (ny - y) / dt);
+        x = nx;
+        y = ny;
+        keep = true;
+      } else {
+        x += vx * dt;
+        y += vy * dt;
+        const f = Math.pow(0.9, dt / 16);
+        vx *= f;
+        vy *= f;
+        if (x < 0) { x = 0; vx = Math.abs(vx) * 0.5; }
+        if (x > maxX()) { x = maxX(); vx = -Math.abs(vx) * 0.5; }
+        if (y < 0) { y = 0; vy = Math.abs(vy) * 0.5; }
+        if (y > maxY()) { y = maxY(); vy = -Math.abs(vy) * 0.5; }
+        towardStretch(vx, vy);
+        keep = Math.hypot(vx, vy) > 0.004 || stretch > 0.002;
+        if (!keep) stretch = 0;
+      }
+      render();
+      if (keep && inView) raf = requestAnimationFrame(tick);
+      else lastT = 0;
+    }
+    const kick = () => { if (!raf && inView) raf = requestAnimationFrame(tick); };
+    const touch = () => {
+      touched = true;
+      hint.classList.add('is-done');
+    };
+
+    drag(lens, {
+      start() {
+        dragging = true;
+        touch();
+        lens.classList.add('is-dragging');
+        vx = 0;
+        vy = 0;
+        return { ox: x, oy: y };
+      },
+      move({ dx, dy, vx: pvx, vy: pvy, ctx }) {
+        x = clamp(ctx.ox + dx, 0, maxX());
+        y = clamp(ctx.oy + dy, 0, maxY());
+        dvx = pvx;
+        dvy = pvy;
+        render();
+        kick();
+      },
+      end({ vx: pvx, vy: pvy }) {
+        dragging = false;
+        lens.classList.remove('is-dragging');
+        vx = clamp(pvx, -2.5, 2.5);
+        vy = clamp(pvy, -2.5, 2.5);
+        kick();
+      },
+    });
+    lens.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 72 : 24;
+      const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      touch();
+      x = clamp(x + d[0], 0, maxX());
+      y = clamp(y + d[1], 0, maxY());
+      render();
+    });
+
+    chipGroup($$('[data-lens]', stage), (b) => {
+      shape = b.dataset.lens;
+      applyShape();
+      computeHome();
+      x = clamp(x, 0, maxX());
+      y = clamp(y, 0, maxY());
+      render();
+      kick();
+    });
+
+    new IntersectionObserver(([en]) => {
+      inView = en.isIntersecting;
+      if (inView) kick();
+    }).observe(stage);
+
+    let rt = 0;
+    window.addEventListener('resize', () => {
+      clearTimeout(rt);
+      rt = setTimeout(() => {
+        applyShape();
+        computeHome();
+        x = clamp(x, 0, maxX());
+        y = clamp(y, 0, maxY());
+        render();
+        kick();
+      }, 120);
+    });
+
+    applyShape();
+    computeHome();
+    x = home.x;
+    y = home.y;
+    render();
+    kick();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(computeHome);
+  }
+
+  /* ---------- 일단 핵심부터: 갤러리 ---------- */
+  function initGallery() {
+    const gallery = $('#gallery');
+    const track = $('#gallery-track');
+    const cards = $$('.gcard', track);
+    const dots = $$('.dotnav__dot', gallery);
+    const btn = $('#gallery-play');
+    const DURATION = 5500;
+    let index = 0;
+    let timer = 0;
+    let inView = false;
+    let playing = !reduced();
+
+    function restartFill() {
+      const d = dots[index];
+      d.classList.remove('is-filling');
+      void d.offsetWidth;
+      d.classList.add('is-filling');
+    }
+    function schedule() {
+      clearTimeout(timer);
+      if (playing && inView) timer = setTimeout(() => go(index + 1), DURATION);
+    }
+    function setActive(i) {
+      index = i;
+      dots.forEach((d, k) => {
+        d.classList.toggle('is-active', k === i);
+        d.classList.remove('is-filling');
+        d.setAttribute('aria-current', String(k === i));
+      });
+      restartFill();
+      schedule();
+    }
+    function go(i) {
+      i = (i + cards.length) % cards.length;
+      const c = cards[i];
+      track.scrollTo({ left: c.offsetLeft - (track.clientWidth - c.offsetWidth) / 2, behavior: reduced() ? 'auto' : 'smooth' });
+      setActive(i);
+    }
+    function setPlaying(p) {
+      playing = p;
+      gallery.classList.toggle('is-playing', p);
+      btn.setAttribute('aria-label', p ? '일시 정지' : '재생');
+      if (p) restartFill();
+      schedule();
+    }
+
+    dots.forEach((d, i) => d.addEventListener('click', () => go(i)));
+    btn.addEventListener('click', () => setPlaying(!playing));
+
+    let st = 0;
+    track.addEventListener('scroll', () => {
+      clearTimeout(st);
+      st = setTimeout(() => {
+        const center = track.scrollLeft + track.clientWidth / 2;
+        let best = 0;
+        let bd = Infinity;
+        cards.forEach((c, i) => {
+          const d = Math.abs(c.offsetLeft + c.offsetWidth / 2 - center);
+          if (d < bd) { bd = d; best = i; }
+        });
+        if (best !== index) setActive(best);
+      }, 90);
+    }, { passive: true });
+    track.addEventListener('pointerdown', schedule);
+
+    new IntersectionObserver(([en]) => {
+      inView = en.isIntersecting;
+      schedule();
+    }, { threshold: 0.35 }).observe(gallery);
+    const cio = new IntersectionObserver((entries) => {
+      entries.forEach((en) => en.target.classList.toggle('is-visible', en.isIntersecting));
+    }, { threshold: 0.4 });
+    cards.forEach((c) => cio.observe(c));
+
+    document.addEventListener('a11ychange', (e) => {
+      if (e.detail.cls === 'reduce-motion' && e.detail.on) setPlaying(false);
+    });
+    setPlaying(playing);
+  }
+
+  /* ---------- 구조: 레이어 토글 · 분해도 ---------- */
+  function initLayers() {
+    const card = $('#layer-card');
+    const stack = $('#layer-stack');
+    const range = $('#explode');
+    const out = $('#explode-val');
+
+    $$('[data-layer]').forEach((sw) => {
+      const name = sw.dataset.layer;
+      const plane = $(`[data-plane="${name}"]`, stack);
+      sw.addEventListener('click', () => {
+        const on = sw.getAttribute('aria-checked') !== 'true';
+        sw.setAttribute('aria-checked', String(on));
+        card.classList.toggle('no-' + name, !on);
+        stack.classList.toggle('no-' + name, !on);
+        if (name === 'base' && card.__glass) card.__glass.setActive(on);
+      });
+      const tile = sw.closest('.tile');
+      tile.addEventListener('pointerenter', () => plane.classList.add('is-hot'));
+      tile.addEventListener('pointerleave', () => plane.classList.remove('is-hot'));
+    });
+
+    const upd = () => {
+      stack.style.setProperty('--gap', (range.value * 0.72).toFixed(1) + 'px');
+      out.textContent = range.value + '%';
+    };
+    range.addEventListener('input', upd);
+    upd();
+  }
+
+  /* ---------- 굴절 실험실 ---------- */
+  function initLab() {
+    const stage = $('#lab-stage');
+    const panel = $('#lab-glass');
+    const mapImg = $('#lab-map');
+    const codeEl = $('#lab-code code');
+    const keys = ['refraction', 'bezel', 'dispersion', 'blur', 'radius'];
+    const inputs = Object.fromEntries(keys.map((k) => [k, $('#lab-' + k)]));
+    const outs = Object.fromEntries(keys.map((k) => [k, $('#lab-' + k + '-val')]));
+    let showMap = false;
+
+    if (!LG.supported) $('#lab-note').hidden = false;
+
+    const read = () => ({
+      refraction: +inputs.refraction.value,
+      bezel: +inputs.bezel.value,
+      dispersion: inputs.dispersion.value / 100,
+      blur: +inputs.blur.value,
+      saturation: 1.5,
+    });
+    panel.style.borderRadius = inputs.radius.value + 'px';
+    const glass = LG.attach(panel, read());
+
+    function update() {
+      panel.style.borderRadius = inputs.radius.value + 'px';
+      panel.style.setProperty('--g-blur', Math.max(3, +inputs.blur.value * 2) + 'px');
+      glass.set(read());
+      outs.refraction.textContent = inputs.refraction.value;
+      outs.bezel.textContent = inputs.bezel.value + 'px';
+      outs.dispersion.textContent = inputs.dispersion.value + '%';
+      outs.blur.textContent = inputs.blur.value + 'px';
+      outs.radius.textContent = inputs.radius.value + 'px';
+      codeEl.textContent = glass.source();
+      if (showMap) mapImg.src = glass.mapURL;
+    }
+    keys.forEach((k) => inputs[k].addEventListener('input', update));
+
+    const mover = movable(panel, stage);
+    chipGroup($$('[data-labbg]'), (b) => setBg($('.bg', stage), b.dataset.labbg));
+
+    $('#lab-showmap').addEventListener('click', (e) => {
+      showMap = !showMap;
+      e.currentTarget.setAttribute('aria-pressed', String(showMap));
+      mapImg.hidden = !showMap;
+      if (showMap) mapImg.src = glass.mapURL;
+    });
+
+    let rt = 0;
+    window.addEventListener('resize', () => {
+      clearTimeout(rt);
+      rt = setTimeout(() => { mover.place(); update(); }, 150);
+    });
+
+    update();
+    mover.center(0.42, 0.42);
+  }
+
+  /* ---------- 광학: 스넬의 법칙 도해 ---------- */
+  function initOptics() {
+    const svg = $('#optics-svg');
+    const nIn = $('#optics-n');
+    const xIn = $('#optics-x');
+    const g = (id) => document.getElementById(id);
+    const C = { x: 420, y: 262 };
+    const R = 160;
+    const TOP = 102;
+    const FLOOR = 262;
+    const X_MIN = 120;
+    const X_MAX = 576;
+    const chips = $$('[data-n]');
+    const deg = (r) => (r * 180) / Math.PI;
+    const setLine = (el, x1, y1, x2, y2) => {
+      el.setAttribute('x1', x1.toFixed(1));
+      el.setAttribute('y1', y1.toFixed(1));
+      el.setAttribute('x2', x2.toFixed(1));
+      el.setAttribute('y2', y2.toFixed(1));
+    };
+
+    function draw() {
+      const n = +nIn.value;
+      const X = X_MIN + ((X_MAX - X_MIN) * xIn.value) / 100;
+      let P;
+      let N;
+      if (X <= C.x) {
+        P = { x: X, y: TOP };
+        N = { x: 0, y: -1 };
+      } else {
+        const dx = X - C.x;
+        const py = C.y - Math.sqrt(R * R - dx * dx);
+        P = { x: X, y: py };
+        N = { x: dx / R, y: (py - C.y) / R };
+      }
+      // 아래로 내려오는 빛 d = (0, 1). 표면 법선 N은 바깥(위)을 향합니다.
+      const cosi = -N.y;
+      const eta = 1 / n;
+      const kk = 1 - eta * eta * (1 - cosi * cosi);
+      const c2 = eta * cosi - Math.sqrt(Math.max(0, kk));
+      const t = { x: c2 * N.x, y: eta + c2 * N.y };
+      const s = (FLOOR - P.y) / t.y;
+      const H = { x: clamp(P.x + s * t.x, 0, 640), y: FLOOR };
+      const th1 = Math.acos(clamp(cosi, -1, 1));
+      const th2 = Math.asin(clamp(eta * Math.sin(th1), -1, 1));
+      const R0 = ((n - 1) / (n + 1)) ** 2;
+      const Rf = n <= 1.001 ? 0 : R0 + (1 - R0) * (1 - cosi) ** 5;
+      const refl = { x: 2 * cosi * N.x, y: 1 + 2 * cosi * N.y };
+
+      g('optics-handle').setAttribute('cx', X.toFixed(1));
+      setLine(g('optics-in'), X, 26, P.x, P.y);
+      setLine(g('optics-out'), P.x, P.y, H.x, H.y);
+      setLine(g('optics-ghost'), X, P.y, X, FLOOR);
+      setLine(g('optics-normal'), P.x - N.x * 44, P.y - N.y * 44, P.x + N.x * 44, P.y + N.y * 44);
+      setLine(g('optics-reflect'), P.x, P.y, P.x + refl.x * 80, P.y + refl.y * 80);
+      g('optics-reflect').style.opacity = clamp(Rf * 5, 0.08, 1).toFixed(2);
+      g('optics-hit').setAttribute('cx', H.x.toFixed(1));
+      const shift = H.x - X;
+      g('optics-shift').setAttribute('d', Math.abs(shift) < 0.5 ? '' : `M${X.toFixed(1)} 276 V288 M${X.toFixed(1)} 282 H${H.x.toFixed(1)} M${H.x.toFixed(1)} 276 V288`);
+
+      g('ro-t1').textContent = deg(th1).toFixed(1) + '°';
+      g('ro-t2').textContent = deg(th2).toFixed(1) + '°';
+      g('ro-dx').textContent = Math.abs(shift).toFixed(1) + 'px';
+      g('ro-r').textContent = (Rf * 100).toFixed(1) + '%';
+      g('optics-n-val').textContent = n.toFixed(2);
+      g('optics-x-val').textContent = X <= C.x ? '평평한 가운데' : '곡면 베젤';
+      pressWhere(chips, (b) => Math.abs(+b.dataset.n - n) < 0.005);
+    }
+
+    nIn.addEventListener('input', draw);
+    xIn.addEventListener('input', draw);
+    chips.forEach((b) => b.addEventListener('click', () => {
+      nIn.value = b.dataset.n;
+      syncRange(nIn);
+      draw();
+    }));
+
+    const toX = (clientX, clientY) => {
+      const pt = svg.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      const p = pt.matrixTransform(svg.getScreenCTM().inverse());
+      xIn.value = clamp(((p.x - X_MIN) / (X_MAX - X_MIN)) * 100, 0, 100);
+      syncRange(xIn);
+      draw();
+    };
+    drag(svg, {
+      start(e) { toX(e.clientX, e.clientY); return {}; },
+      move({ ev }) { toX(ev.clientX, ev.clientY); },
+    });
+    draw();
+  }
+
+  /* ---------- 인터랙션: 세그먼트 컨트롤 ---------- */
+  function initSegmented() {
+    const seg = $('#seg');
+    const pill = $('#seg-pill');
+    const opts = $$('.seg__opt', seg);
+    const glass = LG.attach(pill, { refraction: 46, bezel: 14, blur: 0, dispersion: 0.6, saturation: 1.3, active: false });
+    const PAD = 4;
+    const ELASTIC = 8;
+    let idx = 0;
+    let w = 0;
+    let pos = 0;
+    let suppressClick = false;
+
+    function setPos(p, sx = 1, sy = 1) {
+      pos = p;
+      pill.style.setProperty('--seg-x', p.toFixed(1) + 'px');
+      pill.style.setProperty('--seg-sx', sx.toFixed(3));
+      pill.style.setProperty('--seg-sy', sy.toFixed(3));
+    }
+    function measure() {
+      w = opts[0].offsetWidth;
+      pill.style.setProperty('--seg-w', w + 'px');
+      setPos(idx * w);
+    }
+    function select(i, focus) {
+      idx = i;
+      opts.forEach((o, k) => {
+        o.setAttribute('aria-checked', String(k === i));
+        o.tabIndex = k === i ? 0 : -1;
+      });
+      setPos(i * w);
+      if (focus) opts[i].focus();
+    }
+
+    opts.forEach((o, i) => o.addEventListener('click', () => {
+      if (suppressClick) return;
+      select(i);
+    }));
+    seg.addEventListener('keydown', (e) => {
+      const d = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      select((idx + d + opts.length) % opts.length, true);
+    });
+
+    drag(seg, {
+      threshold: 3,
+      start(e) {
+        const local = e.clientX - seg.getBoundingClientRect().left - PAD;
+        return { onPill: local >= pos - 4 && local <= pos + w + 4, start: pos };
+      },
+      move({ dx, vx, ctx }) {
+        if (!ctx.onPill) return;
+        if (!seg.classList.contains('is-dragging')) {
+          seg.classList.add('is-dragging');
+          glass.setActive(true);
+        }
+        const max = (opts.length - 1) * w;
+        let p = ctx.start + dx;
+        if (p < 0) p = -ELASTIC * (1 - Math.exp(p / 40));
+        else if (p > max) p = max + ELASTIC * (1 - Math.exp(-(p - max) / 40));
+        const st = clamp(Math.abs(vx) * 0.12, 0, 0.16);
+        setPos(p, 1.08 + st, 1.08 - st * 0.5);
+      },
+      end({ active, ctx }) {
+        if (!ctx.onPill || !active) return;
+        suppressClick = true;
+        setTimeout(() => { suppressClick = false; }, 0);
+        seg.classList.remove('is-dragging');
+        select(clamp(Math.round(pos / w), 0, opts.length - 1));
+        setTimeout(() => { if (!seg.classList.contains('is-dragging')) glass.setActive(false); }, 260);
+      },
+    });
+
+    new ResizeObserver(measure).observe(seg);
+    measure();
+    select(0);
+  }
+
+  /* ---------- 인터랙션: 스위치 ---------- */
+  function initSwitch() {
+    const sw = $('#gswitch');
+    const thumb = $('#gswitch-thumb');
+    const glass = LG.attach(thumb, { refraction: 40, bezel: 12, blur: 0, dispersion: 0.7, saturation: 1.4, active: false });
+    let offTimer = 0;
+    const press = () => {
+      clearTimeout(offTimer);
+      sw.classList.add('is-pressed');
+      glass.setActive(true);
+    };
+    const release = () => {
+      if (!sw.classList.contains('is-pressed')) return;
+      sw.classList.remove('is-pressed');
+      offTimer = setTimeout(() => glass.setActive(false), 260);
+    };
+    sw.addEventListener('pointerdown', (e) => { if (e.button === 0) press(); });
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
+    sw.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') press(); });
+    sw.addEventListener('keyup', release);
+    sw.addEventListener('blur', release);
+    sw.addEventListener('click', () => {
+      sw.setAttribute('aria-checked', String(sw.getAttribute('aria-checked') !== 'true'));
+    });
+  }
+
+  /* ---------- 인터랙션: 슬라이더 ---------- */
+  function initSlider() {
+    const sl = $('#gslider');
+    const track = $('.gslider__track', sl);
+    const thumb = $('#gslider-thumb');
+    const glass = LG.attach(thumb, { refraction: 34, bezel: 12, blur: 0, dispersion: 0.6, saturation: 1.3, active: false });
+    let v = 40;
+    let offTimer = 0;
+
+    function set(nv) {
+      v = clamp(Math.round(nv), 0, 100);
+      sl.style.setProperty('--vr', (v / 100).toFixed(3));
+      sl.style.setProperty('--vx', ((v / 100) * track.offsetWidth).toFixed(1) + 'px');
+      sl.setAttribute('aria-valuenow', String(v));
+    }
+    const fromX = (clientX) => {
+      const r = track.getBoundingClientRect();
+      return ((clientX - r.left) / r.width) * 100;
+    };
+    drag(sl, {
+      start(e) {
+        clearTimeout(offTimer);
+        sl.classList.add('is-dragging');
+        glass.setActive(true);
+        set(fromX(e.clientX));
+        return {};
+      },
+      move({ ev }) { set(fromX(ev.clientX)); },
+      end() {
+        sl.classList.remove('is-dragging');
+        offTimer = setTimeout(() => glass.setActive(false), 300);
+      },
+    });
+    sl.addEventListener('keydown', (e) => {
+      const d = { ArrowLeft: -5, ArrowDown: -5, ArrowRight: 5, ArrowUp: 5, PageDown: -20, PageUp: 20 }[e.key];
+      if (e.key === 'Home') set(0);
+      else if (e.key === 'End') set(100);
+      else if (d) set(v + d);
+      else return;
+      e.preventDefault();
+    });
+    new ResizeObserver(() => set(v)).observe(track);
+    set(v);
+  }
+
+  /* ---------- 인터랙션: 스프링 곡선 ---------- */
+  function initSpring() {
+    const y1In = $('#spring-y1');
+    const curve = $('#spring-curve');
+    const peak = $('#spring-peak');
+    const code = $('#spring-code');
+    const over = $('#spring-over');
+    const out = $('#spring-y1-val');
+    const rail = $('.spring__rail');
+    const dot = $('#spring-dot');
+    const X1 = 0.34;
+    const X2 = 0.64;
+    const Y2 = 1;
+    const gx = (t) => 30 + t * 220;
+    const gy = (p) => 190 - p * 110;
+
+    function update() {
+      const y1 = +y1In.value;
+      curve.setAttribute('d', `M${gx(0)} ${gy(0)} C${gx(X1).toFixed(1)} ${gy(y1).toFixed(1)} ${gx(X2).toFixed(1)} ${gy(Y2).toFixed(1)} ${gx(1)} ${gy(1)}`);
+      let best = { x: 1, y: 1 };
+      for (let i = 0; i <= 200; i++) {
+        const s = i / 200;
+        const m = 1 - s;
+        const by = 3 * m * m * s * y1 + 3 * m * s * s * Y2 + s * s * s;
+        const bx = 3 * m * m * s * X1 + 3 * m * s * s * X2 + s * s * s;
+        if (by > best.y) best = { x: bx, y: by };
+      }
+      peak.setAttribute('cx', gx(best.x).toFixed(1));
+      peak.setAttribute('cy', gy(best.y).toFixed(1));
+      const str = `cubic-bezier(${X1}, ${y1.toFixed(2)}, ${X2}, ${Y2})`;
+      code.textContent = str;
+      out.textContent = y1.toFixed(2);
+      over.textContent = best.y > 1.004 ? `최대 오버슈트 +${((best.y - 1) * 100).toFixed(0)}%` : '오버슈트 없음';
+      root.style.setProperty('--spring', str);
+    }
+    const setRail = () => rail.style.setProperty('--rail-x', Math.max(0, rail.clientWidth - dot.offsetWidth - 8) + 'px');
+
+    y1In.addEventListener('input', update);
+    $('#spring-play').addEventListener('click', () => {
+      setRail();
+      rail.classList.toggle('is-end');
+    });
+    window.addEventListener('resize', setRail);
+    setRail();
+    update();
+  }
+
+  /* ---------- 사용 경험: 휴대폰 화면 ---------- */
+  function initExperience() {
+    const tabs = $$('.tabs__tab');
+    const panel = $('#xp-panel');
+    const screens = $$('.screen[data-screen]');
+    const texts = $$('.xp__item');
+
+    function show(name, focus) {
+      tabs.forEach((t) => {
+        const on = t.dataset.screen === name;
+        t.setAttribute('aria-selected', String(on));
+        t.tabIndex = on ? 0 : -1;
+        if (on) {
+          panel.setAttribute('aria-labelledby', t.id);
+          if (focus) t.focus();
+        }
+      });
+      screens.forEach((s) => { s.hidden = s.dataset.screen !== name; });
+      texts.forEach((s) => { s.hidden = s.dataset.screen !== name; });
+    }
+    tabs.forEach((t, i) => {
+      t.addEventListener('click', () => show(t.dataset.screen));
+      t.addEventListener('keydown', (e) => {
+        const d = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+        if (!d) return;
+        e.preventDefault();
+        show(tabs[(i + d + tabs.length) % tabs.length].dataset.screen, true);
+      });
+    });
+
+    // 사진 보관함
+    const grid = $('#photo-grid');
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < 54; i++) {
+      const h = (i * 47 + 12) % 360;
+      const tile = document.createElement('i');
+      const sun = i % 5 === 0 ? `radial-gradient(30% 30% at ${20 + ((i * 13) % 60)}% 30%, hsl(${(h + 60) % 360} 100% 85%), transparent 70%), ` : '';
+      tile.style.background = `${sun}linear-gradient(${(i * 37) % 180}deg, hsl(${h} 78% 62%), hsl(${(h + 40) % 360} 72% 38%))`;
+      frag.appendChild(tile);
+    }
+    grid.appendChild(frag);
+
+    const photos = $('#photos-scroller');
+    const photosScreen = photos.closest('.screen');
+    let lastTop = 0;
+    photos.addEventListener('scroll', () => {
+      const top = photos.scrollTop;
+      if (top > lastTop + 4 && top > 40) photosScreen.classList.add('is-min');
+      else if (top < lastTop - 4 || top < 20) photosScreen.classList.remove('is-min');
+      lastTop = top;
+    }, { passive: true });
+    const tabBtns = $$('.ios-tab', photosScreen);
+    tabBtns.forEach((b) => b.addEventListener('click', () => {
+      if (photosScreen.classList.contains('is-min')) {
+        photosScreen.classList.remove('is-min');
+        return;
+      }
+      tabBtns.forEach((x) => x.classList.toggle('is-active', x === b));
+    }));
+
+    // 앨범
+    const names = ['Refraction', '빛의 굴절', 'Specular Light', 'Fresnel', 'Caustics', 'Soft Bezel', '유리 위의 비', 'Displacement', 'Chromatic', 'Spring 1.56', 'Backdrop', 'Clear Glass', '틴트', 'Lens Flare', 'Liquid Motion'];
+    $('#tracks').innerHTML = names.map((n) => `<li>${n}</li>`).join('');
+    const album = $('#album-scroller');
+    const albumScreen = album.closest('.screen');
+    album.addEventListener('scroll', () => {
+      albumScreen.classList.toggle('is-scrolled', album.scrollTop > 250);
+    }, { passive: true });
+
+    // 제어 센터
+    $$('.cc-btn, .cc-round, .cc-focus').forEach((b) => b.addEventListener('click', () => {
+      b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'));
+    }));
+    $$('.cc-slider').forEach((sl) => {
+      const set = (v) => {
+        v = clamp(Math.round(v), 0, 100);
+        sl.style.setProperty('--vr', (v / 100).toFixed(3));
+        sl.setAttribute('aria-valuenow', String(v));
+      };
+      drag(sl, {
+        start() { return { v0: +sl.getAttribute('aria-valuenow'), h: sl.offsetHeight }; },
+        move({ dy, ctx }) { set(ctx.v0 - (dy / ctx.h) * 100); },
+      });
+      sl.addEventListener('keydown', (e) => {
+        const d = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5 }[e.key];
+        if (!d) return;
+        e.preventDefault();
+        set(+sl.getAttribute('aria-valuenow') + d);
+      });
+      set(+sl.getAttribute('aria-valuenow'));
+    });
+
+    // 알림
+    // 펼칠 때는 아래 카드부터 실제 높이를 쌓아 올립니다 (카드마다 줄 수가 다름)
+    const notifs = $('#notifs');
+    const cards = $$('.notif', notifs);
+    const stackUp = () => {
+      let acc = 0;
+      for (let i = cards.length - 1; i >= 0; i--) {
+        cards[i].style.setProperty('--oy', -acc + 'px');
+        acc += cards[i].offsetHeight + 8;
+      }
+    };
+    cards.forEach((n) => n.addEventListener('click', () => {
+      stackUp();
+      notifs.classList.toggle('is-open');
+    }));
+    try {
+      $('#lock-date').textContent = new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date());
+    } catch (e) { /* 기본 문구 유지 */ }
+
+    show('tabbar');
+  }
+
+  /* ---------- 직접 만들기 ---------- */
+  const PRESETS = {
+    liquid: { refraction: 70, bezel: 24, dispersion: 30, blur: 1.5, saturation: 160, radius: 36, tint: '#ffffff', tintA: 8, hi: 55, shadow: 40, fg: 'light' },
+    clear: { refraction: 110, bezel: 32, dispersion: 55, blur: 0, saturation: 120, radius: 36, tint: '#ffffff', tintA: 0, hi: 75, shadow: 25, fg: 'light' },
+    tinted: { refraction: 60, bezel: 22, dispersion: 20, blur: 3, saturation: 180, radius: 36, tint: '#0a84ff', tintA: 38, hi: 50, shadow: 40, fg: 'light' },
+    glassmorphism: { refraction: 0, bezel: 24, dispersion: 0, blur: 16, saturation: 100, radius: 16, tint: '#ffffff', tintA: 15, hi: 30, shadow: 60, fg: 'light' },
+    ios7: { refraction: 0, bezel: 24, dispersion: 0, blur: 30, saturation: 180, radius: 12, tint: '#f8f8f8', tintA: 62, hi: 0, shadow: 0, fg: 'dark' },
+  };
+  const SHAPES = { card: { w: 340, h: 210 }, capsule: { w: 300, h: 64 }, circle: { w: 110, h: 110 } };
+  const PAGE_BG = {
+    scene: 'linear-gradient(#1b2a6b 0%, #5b3b8f 34%, #e86d7c 60%, #ffb36b 74%, #ffd39a 78%, #3b2c6e 79%)',
+    aurora: 'radial-gradient(45% 60% at 15% 25%, #ff8a3d, transparent 70%), radial-gradient(40% 55% at 85% 20%, #5e5ce6, transparent 70%), radial-gradient(50% 60% at 70% 90%, #00c7be, transparent 70%), radial-gradient(35% 45% at 25% 90%, #ff375f, transparent 70%), #241a3a',
+    night: 'radial-gradient(30% 40% at 70% 30%, #3a3aa0, transparent 70%), radial-gradient(40% 40% at 20% 80%, #1f5f7a, transparent 70%), #07070d',
+    text: '#fff',
+  };
+  let applyPreset = () => {};
+
+  function initBuilder() {
+    const stage = $('#build-stage');
+    const el = $('#build-glass');
+    const inputs = $$('#build-form .range');
+    const presetBtns = $$('[data-preset]');
+    const shapeBtns = $$('[data-shape]');
+    const bgBtns = $$('[data-buildbg]');
+    const fgBtns = $$('[data-fg]');
+    const swatches = $$('#build-swatches .swatch[data-tint]');
+    const customTint = $('#b-tint-custom');
+    const customWrap = customTint.closest('.swatch--custom');
+    const codeTabs = $$('#code-tabs .chip');
+    const codeOut = $('#code-out code');
+    const state = Object.assign({ shape: 'card', bg: 'scene', code: 'html' }, PRESETS.liquid);
+    const glass = LG.attach(el, {});
+    refreshOnShapeEnd(el);
+    const mover = movable(el, stage);
+
+    const fmt = {
+      refraction: (v) => String(v),
+      bezel: (v) => v + 'px',
+      dispersion: (v) => v + '%',
+      blur: (v) => v + 'px',
+      saturation: (v) => v + '%',
+      radius: (v) => v + 'px',
+      tintA: (v) => v + '%',
+      hi: (v) => v + '%',
+      shadow: (v) => v + '%',
+    };
+
+    const hexToRgb = (hex) => {
+      const n = parseInt(hex.slice(1), 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    };
+    const rgba = (hex, a) => `rgb(${hexToRgb(hex).join(' ')} / ${+a.toFixed(2)})`;
+    const white = (a) => `rgb(255 255 255 / ${+Math.min(1, a).toFixed(2)})`;
+
+    function dims(scaled) {
+      const base = SHAPES[state.shape];
+      let w = base.w;
+      let h = base.h;
+      if (scaled) {
+        const s = Math.min(1, (stage.clientWidth - 32) / w);
+        w = Math.round(w * s);
+        h = state.shape === 'circle' ? w : Math.round(h * (state.shape === 'card' ? s : 1));
+      }
+      const r = state.shape === 'card' ? state.radius : Math.round(Math.min(w, h) / 2);
+      return { w, h, r };
+    }
+
+    function syncControls() {
+      inputs.forEach((i) => {
+        const k = i.dataset.key;
+        i.value = state[k];
+        syncRange(i);
+        $('#' + i.id + '-val').textContent = fmt[k](state[k]);
+      });
+      const known = swatches.some((s) => s.dataset.tint === state.tint);
+      swatches.forEach((s) => s.setAttribute('aria-checked', String(s.dataset.tint === state.tint)));
+      customWrap.classList.toggle('is-on', !known);
+      if (!known) customTint.value = state.tint;
+      pressWhere(fgBtns, (b) => b.dataset.fg === state.fg);
+      pressWhere(shapeBtns, (b) => b.dataset.shape === state.shape);
+      $('#b-radius').disabled = state.shape !== 'card';
+    }
+
+    function apply() {
+      const s = state;
+      const { w, h, r } = dims(true);
+      el.dataset.shape = s.shape;
+      el.style.setProperty('--bw', w + 'px');
+      el.style.setProperty('--bh', h + 'px');
+      el.style.setProperty('--br', r + 'px');
+      el.style.setProperty('--g-tint', rgba(s.tint, s.tintA / 100));
+      el.style.setProperty('--g-hi', (s.hi / 100).toFixed(2));
+      el.style.setProperty('--g-shadow', `0 12px 32px rgb(0 0 0 / ${((s.shadow / 100) * 0.5).toFixed(2)})`);
+      el.style.setProperty('--g-blur', (s.refraction > 0 ? Math.max(8, s.blur) : s.blur) + 'px');
+      el.style.setProperty('--g-sat', s.saturation + '%');
+      el.style.color = s.fg === 'light' ? '#fff' : '#1d1d1f';
+      glass.set({
+        refraction: s.refraction,
+        bezel: s.bezel,
+        dispersion: s.dispersion / 100,
+        blur: s.blur,
+        saturation: s.saturation / 100,
+      });
+      renderCode();
+    }
+
+    /* ----- 코드 생성 ----- */
+    function filterMarkup(w, h) {
+      const s = state;
+      const S = s.refraction;
+      const lines = [
+        `<filter id="liquid-glass" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">`,
+        `  <feGaussianBlur in="SourceGraphic" stdDeviation="${s.blur}" result="blur"/>`,
+        `  <feImage id="liquid-glass-map" x="0" y="0" width="${w}" height="${h}" preserveAspectRatio="none" result="map"/>`,
+      ];
+      if (s.dispersion > 0) {
+        const spread = (s.dispersion / 100) * 0.18;
+        const ch = [
+          ['r', S * (1 - spread), '1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0'],
+          ['g', S, '0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0'],
+          ['b', S * (1 + spread), '0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0'],
+        ];
+        lines.push('  <!-- 빨강·초록·파랑을 조금씩 다르게 밀어 색수차를 만듭니다 -->');
+        ch.forEach(([n, sc, m]) => {
+          lines.push(`  <feDisplacementMap in="blur" in2="map" scale="${sc.toFixed(1)}" xChannelSelector="R" yChannelSelector="G" result="d${n}"/>`);
+          lines.push(`  <feColorMatrix in="d${n}" type="matrix" values="${m}" result="c${n}"/>`);
+        });
+        lines.push('  <feBlend in="cr" in2="cg" mode="screen" result="rg"/>');
+        lines.push('  <feBlend in="rg" in2="cb" mode="screen" result="refract"/>');
+      } else {
+        lines.push(`  <feDisplacementMap in="blur" in2="map" scale="${S}" xChannelSelector="R" yChannelSelector="G" result="refract"/>`);
+      }
+      lines.push(`  <feColorMatrix in="refract" type="saturate" values="${(s.saturation / 100).toFixed(2)}"/>`);
+      lines.push('</filter>');
+      return lines;
+    }
+
+    function contentMarkup() {
+      if (state.shape === 'card') {
+        return ['  <div class="weather">', '    <p class="city">서울</p>', '    <p class="temp">18°</p>', '    <p class="desc">대체로 맑음</p>', '  </div>'];
+      }
+      if (state.shape === 'capsule') return ['  <span>뒤로</span>', '  <span>좋아요</span>', '  <span>공유</span>', '  <span>더 보기</span>'];
+      return ['  <span>▶</span>'];
+    }
+
+    function snippet() {
+      const s = state;
+      const { w, h, r } = dims(false);
+      const refract = s.refraction > 0;
+      const hi = s.hi / 100;
+      const fallbackBlur = refract ? Math.max(8, s.blur) : s.blur;
+      const html = [];
+      if (refract) {
+        html.push('<!-- 1. SVG 굴절 필터: 페이지에 한 번만 넣습니다 -->');
+        html.push('<svg width="0" height="0" style="position:absolute" aria-hidden="true">');
+        filterMarkup(w, h).forEach((l) => html.push('  ' + l));
+        html.push('</svg>', '');
+        html.push('<!-- 2. 유리 요소 -->');
+      }
+      html.push('<div class="liquid-glass">', ...contentMarkup(), '</div>');
+
+      const css = [
+        '.liquid-glass {',
+        '  position: relative;',
+        '  isolation: isolate;',
+        `  width: ${w}px;`,
+        `  height: ${h}px;`,
+        `  border-radius: ${r}px;`,
+        `  color: ${s.fg === 'light' ? '#fff' : '#1d1d1f'};`,
+        `  background-color: ${rgba(s.tint, s.tintA / 100)};`,
+      ];
+      if (refract) css.push('  /* 굴절을 지원하지 않는 브라우저용 대체 스타일 */');
+      css.push(
+        `  -webkit-backdrop-filter: blur(${fallbackBlur}px) saturate(${s.saturation}%);`,
+        `  backdrop-filter: blur(${fallbackBlur}px) saturate(${s.saturation}%);`,
+        '  box-shadow:',
+        `    inset 0 1px 0 ${white(hi * 1.1)},`,
+        `    inset 0 -1px 0 ${white(hi * 0.3)},`,
+        `    0 12px 32px rgb(0 0 0 / ${+((s.shadow / 100) * 0.5).toFixed(2)});`,
+        '}',
+      );
+      if (refract) {
+        css.push('', '/* Chromium: SVG 굴절 필터를 화면 뒤에 겁니다 (JS가 클래스를 붙입니다) */', '.liquid-glass.is-refractive {', '  backdrop-filter: url(#liquid-glass);', '}');
+      }
+      if (hi > 0) {
+        css.push(
+          '',
+          '/* 프레넬: 위가 밝고 아래로 갈수록 사라지는 반사 */',
+          '.liquid-glass::before {',
+          '  content: "";',
+          '  position: absolute;',
+          '  inset: 0;',
+          '  z-index: -1;',
+          '  border-radius: inherit;',
+          `  background: linear-gradient(to bottom, ${white(hi * 0.5)}, rgb(255 255 255 / 0) 55%);`,
+          '  pointer-events: none;',
+          '}',
+          '',
+          '/* 테두리 링: 원뿔형 그라데이션을 1px 테두리만 남기고 가립니다 */',
+          '.liquid-glass::after {',
+          '  content: "";',
+          '  position: absolute;',
+          '  inset: 0;',
+          '  border-radius: inherit;',
+          '  padding: 1px;',
+          '  background: conic-gradient(from -45deg,',
+          `    ${white(hi * 1.7)}, ${white(hi * 0.25)} 14%, ${white(hi * 0.08)} 32%,`,
+          `    ${white(hi * 0.9)} 50%, ${white(hi * 0.08)} 68%, ${white(hi * 0.25)} 86%,`,
+          `    ${white(hi * 1.7)});`,
+          '  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);',
+          '  -webkit-mask-composite: xor;',
+          '  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);',
+          '  pointer-events: none;',
+          '}',
+        );
+      }
+
+      const js = refract ? [
+        '// 변위 맵: 가장자리(베젤)에서만 배경을 안쪽으로 끌어당깁니다.',
+        '// R = 가로, G = 세로 변위. 128은 제자리입니다.',
+        '(function () {',
+        "  const el = document.querySelector('.liquid-glass');",
+        "  const map = document.getElementById('liquid-glass-map');",
+        `  const BEZEL = ${s.bezel};`,
+        '',
+        '  const brands = navigator.userAgentData && navigator.userAgentData.brands;',
+        '  const chromium = !!brands && brands.some((b) => /Chrom|Edge/.test(b.brand));',
+        "  if (!chromium || !CSS.supports('backdrop-filter', 'url(#a)')) return;",
+        '',
+        '  const w = el.offsetWidth;',
+        '  const h = el.offsetHeight;',
+        '  const r = Math.min(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0, w / 2, h / 2);',
+        "  const canvas = document.createElement('canvas');",
+        '  canvas.width = w;',
+        '  canvas.height = h;',
+        "  const ctx = canvas.getContext('2d');",
+        '  const img = ctx.createImageData(w, h);',
+        '',
+        '  for (let y = 0; y < h; y++) {',
+        '    for (let x = 0; x < w; x++) {',
+        '      const px = x + 0.5 - w / 2;',
+        '      const py = y + 0.5 - h / 2;',
+        '      const qx = Math.abs(px) - (w / 2 - r);',
+        '      const qy = Math.abs(py) - (h / 2 - r);',
+        '      let d, nx = 0, ny = 0;',
+        '      if (qx > 0 && qy > 0) {',
+        '        const l = Math.hypot(qx, qy);',
+        '        d = l - r;',
+        '        nx = (Math.sign(px) * qx) / l;',
+        '        ny = (Math.sign(py) * qy) / l;',
+        '      } else if (qx > qy) {',
+        '        d = qx - r;',
+        '        nx = Math.sign(px);',
+        '      } else {',
+        '        d = qy - r;',
+        '        ny = Math.sign(py);',
+        '      }',
+        '      const t = Math.max(0, Math.min(1, 1 + d / BEZEL)); // 가장자리 1 → 안쪽 0',
+        '      const m = 1 - Math.sqrt(1 - t * t);                 // 원호 모양의 볼록한 테두리',
+        '      const i = (y * w + x) * 4;',
+        '      img.data[i] = 128 - nx * m * 127;',
+        '      img.data[i + 1] = 128 - ny * m * 127;',
+        '      img.data[i + 2] = 128;',
+        '      img.data[i + 3] = 255;',
+        '    }',
+        '  }',
+        '  ctx.putImageData(img, 0, 0);',
+        "  map.setAttribute('href', canvas.toDataURL());",
+        "  el.classList.add('is-refractive');",
+        '})();',
+      ] : ['// 굴절이 0이면 JS가 필요 없습니다. CSS만으로 동작합니다.'];
+
+      return { html: html.join('\n'), css: css.join('\n'), js: js.join('\n'), refract };
+    }
+
+    function fullHTML() {
+      const s = snippet();
+      const pageCss = [
+        '/* 데모용 페이지 */',
+        'body {',
+        '  margin: 0;',
+        '  min-height: 100vh;',
+        '  display: grid;',
+        '  place-items: center;',
+        '  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;',
+        `  background: ${PAGE_BG[state.bg] || PAGE_BG.aurora};`,
+        '}',
+        'body::before {',
+        '  content: "LIQUID GLASS";',
+        '  position: fixed;',
+        '  inset: 0;',
+        '  z-index: -1;',
+        '  display: grid;',
+        '  place-items: center;',
+        '  font: 800 14vw/1 system-ui, sans-serif;',
+        '  letter-spacing: -0.05em;',
+        `  color: ${state.bg === 'text' ? '#1d1d1f' : 'rgb(255 255 255 / .6)'};`,
+        '}',
+        '.liquid-glass { display: flex; align-items: center; justify-content: space-around; }',
+        '.weather { padding: 22px 26px; width: 100%; }',
+        '.weather p { margin: 0; }',
+        '.city { font-size: 18px; font-weight: 600; }',
+        '.temp { font-size: 64px; font-weight: 300; line-height: 1; }',
+        '.desc { margin-top: 8px !important; font-weight: 600; }',
+      ].join('\n');
+      return [
+        '<!doctype html>',
+        '<html lang="ko">',
+        '<head>',
+        '<meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        '<title>Liquid Glass</title>',
+        '<style>',
+        pageCss,
+        '',
+        s.css,
+        '</style>',
+        '</head>',
+        '<body>',
+        s.html,
+        s.refract ? '<script>\n' + s.js + '\n</' + 'script>' : '',
+        '</body>',
+        '</html>',
+        '',
+      ].join('\n');
+    }
+
+    function renderCode() {
+      codeOut.textContent = snippet()[state.code];
+    }
+
+    /* ----- 이벤트 ----- */
+    inputs.forEach((i) => i.addEventListener('input', () => {
+      state[i.dataset.key] = +i.value;
+      $('#' + i.id + '-val').textContent = fmt[i.dataset.key](state[i.dataset.key]);
+      pressWhere(presetBtns, () => false);
+      apply();
+    }));
+    swatches.forEach((sw) => sw.addEventListener('click', () => {
+      state.tint = sw.dataset.tint;
+      if (state.tintA < 10) state.tintA = 30;
+      syncControls();
+      apply();
+    }));
+    customTint.addEventListener('input', () => {
+      state.tint = customTint.value;
+      if (state.tintA < 10) state.tintA = 30;
+      syncControls();
+      apply();
+    });
+    chipGroup(fgBtns, (b) => { state.fg = b.dataset.fg; apply(); });
+    chipGroup(shapeBtns, (b) => {
+      state.shape = b.dataset.shape;
+      syncControls();
+      apply();
+      requestAnimationFrame(() => mover.place());
+    });
+    chipGroup(bgBtns, (b) => {
+      state.bg = b.dataset.buildbg;
+      setBg($('.bg', stage), state.bg);
+      if (state.bg === 'text' && state.fg === 'light' && state.tintA < 30) { state.fg = 'dark'; syncControls(); apply(); }
+    });
+    applyPreset = (name) => {
+      Object.assign(state, PRESETS[name]);
+      pressWhere(presetBtns, (b) => b.dataset.preset === name);
+      syncControls();
+      apply();
+    };
+    presetBtns.forEach((b) => b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+    codeTabs.forEach((b) => b.addEventListener('click', () => {
+      state.code = b.dataset.code;
+      codeTabs.forEach((x) => {
+        x.setAttribute('aria-pressed', String(x === b));
+        x.setAttribute('aria-selected', String(x === b));
+      });
+      renderCode();
+    }));
+    $('#build-form').addEventListener('submit', (e) => e.preventDefault());
+
+    $('#code-copy').addEventListener('click', () => {
+      const text = fullHTML();
+      const fallback = () => {
+        codeOut.textContent = text;
+        const range = document.createRange();
+        range.selectNodeContents(codeOut);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        toast('코드를 선택했습니다. ⌘C 또는 Ctrl+C로 복사하세요');
+      };
+      try {
+        navigator.clipboard.writeText(text).then(() => toast('전체 HTML을 복사했습니다'), fallback);
+      } catch (e) {
+        fallback();
+      }
+    });
+
+    let rt = 0;
+    window.addEventListener('resize', () => {
+      clearTimeout(rt);
+      rt = setTimeout(() => { apply(); mover.place(); }, 150);
+    });
+
+    syncControls();
+    apply();
+    requestAnimationFrame(() => mover.center(0.5, 0.45));
+  }
+
+  function initCompare() {
+    $$('[data-topreset]').forEach((b) => b.addEventListener('click', () => {
+      applyPreset(b.dataset.topreset);
+      document.getElementById('build').scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth' });
+    }));
+  }
+
+  /* ---------- 성능: 유리 개수와 프레임 ---------- */
+  function initPerf() {
+    const stage = $('#perf-stage');
+    const box = $('#perf-bubbles');
+    const countIn = $('#perf-count');
+    const countOut = $('#perf-count-val');
+    const fpsEl = $('#perf-fps');
+    const msEl = $('#perf-ms');
+    const OPTS = { refraction: 60, bezel: 22, blur: 1, dispersion: 0.3, saturation: 1.5 };
+    const bubbles = [];
+    let mode = 'refract';
+    let running = false;
+    let raf = 0;
+
+    let seed = 7;
+    const rnd = () => {
+      seed = (seed * 16807) % 2147483647;
+      return (seed - 1) / 2147483646;
+    };
+
+    function applyMode() {
+      box.classList.toggle('is-blur', mode === 'blur');
+      box.classList.toggle('is-none', mode === 'none');
+      bubbles.forEach((b) => {
+        if (mode === 'refract') LG.attach(b, OPTS).setActive(true);
+        else if (b.__glass) b.__glass.setActive(false);
+      });
+    }
+    function build() {
+      const n = +countIn.value;
+      countOut.textContent = n + '개';
+      while (bubbles.length > n) {
+        const b = bubbles.pop();
+        if (b.__glass) b.__glass.destroy();
+        b.remove();
+      }
+      while (bubbles.length < n) {
+        const b = document.createElement('div');
+        const s = 64 + rnd() * 80;
+        b.className = 'bubble glass';
+        b.style.setProperty('--s', s.toFixed(0) + 'px');
+        b.style.setProperty('--x', (2 + rnd() * 80).toFixed(1) + '%');
+        b.style.setProperty('--y', (4 + rnd() * 70).toFixed(1) + '%');
+        b.style.setProperty('--mx', ((rnd() - 0.5) * 140).toFixed(0) + 'px');
+        b.style.setProperty('--my', ((rnd() - 0.5) * 100).toFixed(0) + 'px');
+        b.style.setProperty('--d', (2.8 + rnd() * 3.5).toFixed(2) + 's');
+        b.style.setProperty('--dl', (-rnd() * 4).toFixed(2) + 's');
+        box.appendChild(b);
+        bubbles.push(b);
+      }
+      applyMode();
+    }
+
+    let frames = 0;
+    let t0 = 0;
+    let prev = 0;
+    let worst = 0;
+    function loop(t) {
+      raf = requestAnimationFrame(loop);
+      if (!t0) { t0 = t; prev = t; return; }
+      frames++;
+      worst = Math.max(worst, t - prev);
+      prev = t;
+      if (t - t0 >= 600) {
+        const fps = (frames * 1000) / (t - t0);
+        fpsEl.textContent = String(Math.round(fps));
+        msEl.textContent = `평균 ${(1000 / fps).toFixed(1)}ms · 가장 긴 프레임 ${worst.toFixed(0)}ms`;
+        frames = 0;
+        t0 = t;
+        worst = 0;
+      }
+    }
+    function setRunning(on) {
+      running = on;
+      stage.classList.toggle('is-running', on);
+      cancelAnimationFrame(raf);
+      t0 = 0;
+      frames = 0;
+      if (on) raf = requestAnimationFrame(loop);
+    }
+
+    countIn.addEventListener('input', build);
+    chipGroup($$('[data-perfmode]'), (b) => { mode = b.dataset.perfmode; applyMode(); });
+    new IntersectionObserver(([en]) => setRunning(en.isIntersecting), { threshold: 0.2 }).observe(stage);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) setRunning(false); });
+    build();
+  }
+
+  /* ---------- 시작 ---------- */
+  initA11y();
+  $$('.range').forEach(syncRange);
+  document.addEventListener('input', (e) => {
+    if (e.target.classList && e.target.classList.contains('range')) syncRange(e.target);
+  });
+  initGlass();
+  initNav();
+  initHero();
+  initGallery();
+  initLayers();
+  initLab();
+  initOptics();
+  initSegmented();
+  initSwitch();
+  initSlider();
+  initSpring();
+  initExperience();
+  initBuilder();
+  initCompare();
+  initPerf();
+})();
