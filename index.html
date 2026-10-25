@@ -274,7 +274,7 @@ el.style.setProperty('--angle', deg + 'deg');</code></pre>
         <button class="chip" type="button" data-labbg="text" aria-pressed="true">글자</button>
         <button class="chip" type="button" data-labbg="grid" aria-pressed="false">격자</button>
         <button class="chip" type="button" data-labbg="stripes" aria-pressed="false">줄무늬</button>
-        <button class="chip" type="button" data-labbg="scene" aria-pressed="false">풍경</button>
+        <button class="chip" type="button" data-labbg="lineup" aria-pressed="false">일러스트</button>
       </div>
       <button class="chip chip--toggle" type="button" id="lab-showmap" aria-pressed="false">변위 맵 보기</button>
     </div>
@@ -512,6 +512,7 @@ el.style.setProperty('--angle', deg + 'deg');</code></pre>
   </div>
 
   <div class="wrap xp" id="xp-panel" role="tabpanel" aria-labelledby="tab-tabbar">
+    <div class="xp__device">
     <div class="phone" aria-label="iPhone 화면 예시">
       <div class="phone__screen">
         <div class="phone__island" aria-hidden="true"></div>
@@ -570,71 +571,11 @@ el.style.setProperty('--angle', deg + 'deg');</code></pre>
           </div>
         </div>
 
-        <!-- 제어 센터 -->
-        <div class="screen screen--cc" data-screen="control" hidden>
-          <div class="cc-wall" aria-hidden="true"></div>
-          <div class="cc-grid">
-            <div class="cc-conn glass" data-refract="refraction:60;bezel:22;blur:4;dispersion:.3;saturation:1.8">
-              <button class="cc-btn cc-btn--orange" type="button" aria-pressed="false" aria-label="에어플레인 모드"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z" fill="currentColor"/></svg></button>
-              <button class="cc-btn cc-btn--green" type="button" aria-pressed="true" aria-label="셀룰러"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="15" width="3.6" height="5" rx="1" fill="currentColor"/><rect x="8.2" y="11" width="3.6" height="9" rx="1" fill="currentColor"/><rect x="13.4" y="7" width="3.6" height="13" rx="1" fill="currentColor"/><rect x="18.6" y="3" width="3.4" height="17" rx="1" fill="currentColor"/></svg></button>
-              <button class="cc-btn" type="button" aria-pressed="true" aria-label="Wi-Fi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.2a9.5 9.5 0 0 1 13 0M8.6 15.3a5 5 0 0 1 6.8 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="18.6" r="1.7" fill="currentColor"/></svg></button>
-              <button class="cc-btn" type="button" aria-pressed="false" aria-label="Bluetooth"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7.5l10 9-5 4.5V3l5 4.5-10 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-            </div>
-            <div class="cc-media glass" data-refract="refraction:60;bezel:22;blur:4;dispersion:.3;saturation:1.8">
-              <div class="cc-media__art" aria-hidden="true"></div>
-              <p class="cc-media__title">Glass Waves<span>Liquid Lab</span></p>
-              <div class="cc-media__ctrl" aria-hidden="true">
-                <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12L18 6v12z" fill="currentColor"/></svg>
-                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
-                <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z" fill="currentColor"/></svg>
-              </div>
-            </div>
-            <button class="cc-focus glass" type="button" aria-pressed="false" data-refract="refraction:50;bezel:20;blur:4;dispersion:.3;saturation:1.8">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/></svg>
-              <span>집중 모드</span>
-            </button>
-            <div class="cc-slider glass" role="slider" tabindex="0" aria-label="밝기" aria-valuemin="0" aria-valuemax="100" aria-valuenow="60" style="--v:60%" data-refract="refraction:50;bezel:20;blur:4;dispersion:.3;saturation:1.8">
-              <span class="cc-slider__fill"></span>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.5 1.5M17.2 17.2l1.5 1.5M5.3 18.7l1.5-1.5M17.2 6.8l1.5-1.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </div>
-            <div class="cc-slider glass" role="slider" tabindex="0" aria-label="음량" aria-valuemin="0" aria-valuemax="100" aria-valuenow="35" style="--v:35%" data-refract="refraction:50;bezel:20;blur:4;dispersion:.3;saturation:1.8">
-              <span class="cc-slider__fill"></span>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 9a4 4 0 0 1 0 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            </div>
-            <button class="cc-round glass" type="button" aria-pressed="false" aria-label="손전등" data-refract="refraction:40;bezel:16;blur:4;dispersion:.3;saturation:1.8"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.5 2.5h9v3.8l-2.8 3.9V21.5h-3.4V10.2L7.5 6.3z" fill="currentColor"/></svg></button>
-            <button class="cc-round glass" type="button" aria-pressed="false" aria-label="타이머" data-refract="refraction:40;bezel:16;blur:4;dispersion:.3;saturation:1.8"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 13V9M10 2.5h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-          </div>
-        </div>
-
-        <!-- 알림 -->
-        <div class="screen screen--lock" data-screen="notify" hidden>
-          <div class="lock-wall bg" data-bg="scene" aria-hidden="true"></div>
-          <p class="lock-date" id="lock-date">10월 25일 일요일</p>
-          <p class="lock-time" aria-hidden="true">9:41</p>
-          <div class="notifs" id="notifs">
-            <button class="notif glass" type="button" style="--n:0" data-refract="refraction:50;bezel:20;blur:6;dispersion:.25;saturation:1.8">
-              <span class="notif__icon notif__icon--msg" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4C6.5 4 2.5 7.4 2.5 11.5c0 2.3 1.3 4.4 3.4 5.8L5 21l4.2-2.3c.9.2 1.8.3 2.8.3 5.5 0 9.5-3.4 9.5-7.5S17.5 4 12 4z" fill="currentColor"/></svg></span>
-              <span class="notif__body"><b>디자인팀</b><span>굴절 강도 70이 제일 자연스러워 보여요. 시안 확인 부탁해요!</span></span>
-              <span class="notif__time">지금</span>
-            </button>
-            <button class="notif glass" type="button" style="--n:1" data-refract="refraction:50;bezel:20;blur:6;dispersion:.25;saturation:1.8">
-              <span class="notif__icon notif__icon--cal" aria-hidden="true">25</span>
-              <span class="notif__body"><b>디자인 리뷰</b><span>오후 2:00 · 3층 회의실</span></span>
-              <span class="notif__time">10분 전</span>
-            </button>
-            <button class="notif glass" type="button" style="--n:2" data-refract="refraction:50;bezel:20;blur:6;dispersion:.25;saturation:1.8">
-              <span class="notif__icon notif__icon--wx" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="9" r="4" fill="#ffd60a"/><path d="M8 19h9a3.5 3.5 0 0 0 .4-7A5 5 0 0 0 8 13a3 3 0 0 0 0 6z" fill="#fff"/></svg></span>
-              <span class="notif__body"><b>서울 18°</b><span>오후부터 맑아져요</span></span>
-              <span class="notif__time">30분 전</span>
-            </button>
-          </div>
-          <div class="lock-actions">
-            <span class="ios-circle ios-circle--lg glass" data-refract="refraction:40;bezel:18;blur:4;dispersion:.3;saturation:1.8" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7.5 2.5h9v3.8l-2.8 3.9V21.5h-3.4V10.2L7.5 6.3z" fill="currentColor"/></svg></span>
-            <span class="ios-circle ios-circle--lg glass" data-refract="refraction:40;bezel:18;blur:4;dispersion:.3;saturation:1.8" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7.5h3l1.8-2.5h6.4L17 7.5h3a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1zM12 16.2a3.4 3.4 0 1 0 0-6.8 3.4 3.4 0 0 0 0 6.8z" fill="currentColor" fill-rule="evenodd"/></svg></span>
-          </div>
-        </div>
       </div>
     </div>
+    <img class="xp__shot" data-screen="control" src="assets/apple-control-center.png" width="450" height="920" alt="리퀴드 글래스가 적용된 iPhone 제어 센터. 연결, 음악, 밝기와 음량 막대, 버튼들이 각각 유리 타일로 떠 있다." hidden>
+    <img class="xp__shot" data-screen="notify" src="assets/apple-notifications.png" width="602" height="920" alt="리퀴드 글래스가 적용된 iPhone 잠금 화면. 시계 아래로 알림 카드 네 장이 유리로 쌓여 있다." hidden>
+  </div>
 
     <div class="xp__text" aria-live="polite">
       <div class="xp__item" data-screen="tabbar">
@@ -647,11 +588,11 @@ el.style.setProperty('--angle', deg + 'deg');</code></pre>
       </div>
       <div class="xp__item" data-screen="control" hidden>
         <h3 class="xp__title">타일마다 한 장의 유리.</h3>
-        <p class="copy">버튼을 눌러 켜고 끄고, 밝기와 음량 막대를 위아래로 끌어 보세요. 타일 아래의 배경화면이 가장자리마다 다르게 비쳐 보입니다.</p>
+        <p class="copy">Apple이 공개한 실제 화면입니다. 연결, 음악, 밝기와 음량, 각 버튼이 저마다 떠 있는 유리 조각이고, <strong>색은 켜진 Wi-Fi처럼 필요한 곳에만</strong> 들어갑니다. 타일 가장자리를 따라 배경화면이 휘어 들어오는 것을 확인해 보세요.</p>
       </div>
       <div class="xp__item" data-screen="notify" hidden>
         <h3 class="xp__title">겹쳐 쌓이는 알림.</h3>
-        <p class="copy">알림 묶음을 눌러 펼치고, 다시 눌러 접어 보세요. 겹친 카드는 아래로 갈수록 작아지고, 펼칠 때는 스프링을 따라 튀어 오릅니다.</p>
+        <p class="copy">Apple이 공개한 실제 잠금 화면입니다. 알림 카드 아래로 배경화면의 곡선이 그대로 비쳐 보이고, 겹친 카드는 <strong>테두리의 빛만 남아</strong> 층이 구분됩니다.</p>
       </div>
     </div>
   </div>
@@ -667,7 +608,7 @@ el.style.setProperty('--angle', deg + 'deg');</code></pre>
 
   <div class="wrap wrap--wide builder">
     <div class="builder__stage stage" id="build-stage">
-      <div class="bg" data-bg="scene"></div>
+      <div class="bg" data-bg="underwater"></div>
       <div class="build-glass glass" id="build-glass" data-lit tabindex="0" role="group" aria-roledescription="움직일 수 있는 유리" aria-label="미리보기 유리. 끌거나 화살표 키로 옮길 수 있습니다.">
         <div class="bw bw--card">
           <p class="bw__city">서울</p>
@@ -709,7 +650,9 @@ el.style.setProperty('--angle', deg + 'deg');</code></pre>
         <fieldset>
           <legend>배경</legend>
           <div class="chips" id="build-bgs">
-            <button class="chip" type="button" data-buildbg="scene" aria-pressed="true">풍경</button>
+            <button class="chip" type="button" data-buildbg="underwater" aria-pressed="true">수중</button>
+            <button class="chip" type="button" data-buildbg="character" aria-pressed="false">캐릭터</button>
+            <button class="chip" type="button" data-buildbg="lineup" aria-pressed="false">라인업</button>
             <button class="chip" type="button" data-buildbg="aurora" aria-pressed="false">오로라</button>
             <button class="chip" type="button" data-buildbg="text" aria-pressed="false">글자</button>
             <button class="chip" type="button" data-buildbg="night" aria-pressed="false">밤</button>
@@ -929,7 +872,8 @@ el.style.setProperty('--angle', deg + 'deg');</code></pre>
       <li id="fn-2">프레임 속도는 이 페이지를 연 기기에서 <code>requestAnimationFrame</code> 호출 간격으로 잰 값이며, 기기 성능과 화면 주사율에 따라 달라집니다.</li>
       <li id="fn-3">굴절률은 노란 나트륨 빛(589nm) 기준의 대표값입니다. 물 1.33, 일반 판유리 약 1.52, 다이아몬드 2.42.</li>
       <li id="fn-4">레이어 구성, 스프링 곡선 <code>cubic-bezier(0.34, 1.56, 0.64, 1)</code>, 드래그 임계값과 탄성 범위는 velog의 「Apple Liquid Glass UI 패턴」 글을 참고했습니다.</li>
-      <li id="fn-5">Apple, iPhone, Liquid Glass는 Apple Inc.의 상표입니다. 이 페이지는 Apple과 관련이 없는 학습용 데모이며, Apple 제품 소개 페이지의 구성 방식을 참고해 만들었습니다.</li>
+      <li id="fn-5">Apple, iPhone, Liquid Glass는 Apple Inc.의 상표이며, 제어 센터와 잠금 화면 이미지는 Apple이 공개한 자료입니다. 이 페이지는 Apple과 관련이 없는 학습용 데모이며, Apple 제품 소개 페이지의 구성 방식을 참고해 만들었습니다.</li>
+      <li id="fn-6">배경 일러스트의 저작권은 각 저작권자에게 있습니다. 【推しの子】 © 赤坂アカ×横槍メンゴ／集英社・【推しの子】製作委員会.</li>
     </ol>
     <nav class="breadcrumbs" aria-label="현재 위치">
       <span>Liquid Glass Lab</span>

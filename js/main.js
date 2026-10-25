@@ -129,7 +129,6 @@
 
   const BG_TEMPLATES = {
     text: '<div class="bgtext"><p>리퀴드 글래스</p><p>LIQUID GLASS</p><p>빛을 휘게 하는</p><p>HTML · CSS · SVG</p><p>굴절 반사 탄성</p><p>LENS 렌즈 LENS</p><p>유리 너머의 글자</p></div>',
-    scene: '<div class="scene-sun"></div><div class="scene-mtn scene-mtn--far"></div><div class="scene-mtn scene-mtn--near"></div><div class="scene-sea"></div>',
   };
 
   function setBg(layer, name) {
@@ -877,7 +876,8 @@
   function initExperience() {
     const tabs = $$('.tabs__tab');
     const panel = $('#xp-panel');
-    const screens = $$('.screen[data-screen]');
+    const phone = $('.phone', panel);
+    const screens = $$('.screen[data-screen], .xp__shot', panel);
     const texts = $$('.xp__item');
 
     function show(name, focus) {
@@ -892,6 +892,8 @@
       });
       screens.forEach((s) => { s.hidden = s.dataset.screen !== name; });
       texts.forEach((s) => { s.hidden = s.dataset.screen !== name; });
+      // 제어 센터와 알림은 Apple 이미지로 보여 주므로 CSS로 만든 휴대폰을 숨깁니다
+      phone.hidden = !$('.screen:not([hidden])', phone);
     }
     tabs.forEach((t, i) => {
       t.addEventListener('click', () => show(t.dataset.screen));
@@ -903,14 +905,15 @@
       });
     });
 
-    // 사진 보관함
+    // 사진 보관함: 일러스트 세 장을 서로 다른 위치와 배율로 잘라 사진처럼 채웁니다
     const grid = $('#photo-grid');
     const frag = document.createDocumentFragment();
+    const ILLUST = ['illust-lineup.jpg', 'illust-underwater.jpg', 'illust-character.jpg'];
     for (let i = 0; i < 54; i++) {
-      const h = (i * 47 + 12) % 360;
       const tile = document.createElement('i');
-      const sun = i % 5 === 0 ? `radial-gradient(30% 30% at ${20 + ((i * 13) % 60)}% 30%, hsl(${(h + 60) % 360} 100% 85%), transparent 70%), ` : '';
-      tile.style.background = `${sun}linear-gradient(${(i * 37) % 180}deg, hsl(${h} 78% 62%), hsl(${(h + 40) % 360} 72% 38%))`;
+      tile.style.backgroundImage = `url("assets/${ILLUST[i % 3]}")`;
+      tile.style.backgroundSize = 160 + ((i * 7) % 4) * 70 + '%';
+      tile.style.backgroundPosition = `${(i * 37) % 100}% ${(i * 53) % 100}%`;
       frag.appendChild(tile);
     }
     grid.appendChild(frag);
@@ -942,48 +945,6 @@
       albumScreen.classList.toggle('is-scrolled', album.scrollTop > 250);
     }, { passive: true });
 
-    // 제어 센터
-    $$('.cc-btn, .cc-round, .cc-focus').forEach((b) => b.addEventListener('click', () => {
-      b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'));
-    }));
-    $$('.cc-slider').forEach((sl) => {
-      const set = (v) => {
-        v = clamp(Math.round(v), 0, 100);
-        sl.style.setProperty('--vr', (v / 100).toFixed(3));
-        sl.setAttribute('aria-valuenow', String(v));
-      };
-      drag(sl, {
-        start() { return { v0: +sl.getAttribute('aria-valuenow'), h: sl.offsetHeight }; },
-        move({ dy, ctx }) { set(ctx.v0 - (dy / ctx.h) * 100); },
-      });
-      sl.addEventListener('keydown', (e) => {
-        const d = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5 }[e.key];
-        if (!d) return;
-        e.preventDefault();
-        set(+sl.getAttribute('aria-valuenow') + d);
-      });
-      set(+sl.getAttribute('aria-valuenow'));
-    });
-
-    // 알림
-    // 펼칠 때는 아래 카드부터 실제 높이를 쌓아 올립니다 (카드마다 줄 수가 다름)
-    const notifs = $('#notifs');
-    const cards = $$('.notif', notifs);
-    const stackUp = () => {
-      let acc = 0;
-      for (let i = cards.length - 1; i >= 0; i--) {
-        cards[i].style.setProperty('--oy', -acc + 'px');
-        acc += cards[i].offsetHeight + 8;
-      }
-    };
-    cards.forEach((n) => n.addEventListener('click', () => {
-      stackUp();
-      notifs.classList.toggle('is-open');
-    }));
-    try {
-      $('#lock-date').textContent = new Intl.DateTimeFormat('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date());
-    } catch (e) { /* 기본 문구 유지 */ }
-
     show('tabbar');
   }
 
@@ -997,11 +958,14 @@
   };
   const SHAPES = { card: { w: 340, h: 210 }, capsule: { w: 300, h: 64 }, circle: { w: 110, h: 110 } };
   const PAGE_BG = {
-    scene: 'linear-gradient(#1b2a6b 0%, #5b3b8f 34%, #e86d7c 60%, #ffb36b 74%, #ffd39a 78%, #3b2c6e 79%)',
+    underwater: '#12324a url("illust-underwater.jpg") center 32% / cover no-repeat',
+    character: '#788b92 url("illust-character.jpg") center 22% / cover no-repeat',
+    lineup: '#f1eff0 url("illust-lineup.jpg") center 30% / cover no-repeat',
     aurora: 'radial-gradient(45% 60% at 15% 25%, #ff8a3d, transparent 70%), radial-gradient(40% 55% at 85% 20%, #5e5ce6, transparent 70%), radial-gradient(50% 60% at 70% 90%, #00c7be, transparent 70%), radial-gradient(35% 45% at 25% 90%, #ff375f, transparent 70%), #241a3a',
     night: 'radial-gradient(30% 40% at 70% 30%, #3a3aa0, transparent 70%), radial-gradient(40% 40% at 20% 80%, #1f5f7a, transparent 70%), #07070d',
     text: '#fff',
   };
+  const LIGHT_BGS = ['text', 'lineup'];
   let applyPreset = () => {};
 
   function initBuilder() {
@@ -1017,7 +981,7 @@
     const customWrap = customTint.closest('.swatch--custom');
     const codeTabs = $$('#code-tabs .chip');
     const codeOut = $('#code-out code');
-    const state = Object.assign({ shape: 'card', bg: 'scene', code: 'html' }, PRESETS.liquid);
+    const state = Object.assign({ shape: 'card', bg: 'underwater', code: 'html' }, PRESETS.liquid);
     const glass = LG.attach(el, {});
     refreshOnShapeEnd(el);
     const mover = movable(el, stage);
@@ -1272,6 +1236,7 @@
         '  display: grid;',
         '  place-items: center;',
         '  font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;',
+        ...(/illust/.test(PAGE_BG[state.bg] || '') ? ['  /* 이미지 파일을 이 HTML과 같은 폴더에 두세요 */'] : []),
         `  background: ${PAGE_BG[state.bg] || PAGE_BG.aurora};`,
         '}',
         'body::before {',
@@ -1283,7 +1248,7 @@
         '  place-items: center;',
         '  font: 800 14vw/1 system-ui, sans-serif;',
         '  letter-spacing: -0.05em;',
-        `  color: ${state.bg === 'text' ? '#1d1d1f' : 'rgb(255 255 255 / .6)'};`,
+        `  color: ${LIGHT_BGS.includes(state.bg) ? '#1d1d1f' : 'rgb(255 255 255 / .6)'};`,
         '}',
         '.liquid-glass { display: flex; align-items: center; justify-content: space-around; }',
         '.weather { padding: 22px 26px; width: 100%; }',
@@ -1347,7 +1312,7 @@
     chipGroup(bgBtns, (b) => {
       state.bg = b.dataset.buildbg;
       setBg($('.bg', stage), state.bg);
-      if (state.bg === 'text' && state.fg === 'light' && state.tintA < 30) { state.fg = 'dark'; syncControls(); apply(); }
+      if (LIGHT_BGS.includes(state.bg) && state.fg === 'light' && state.tintA < 30) { state.fg = 'dark'; syncControls(); apply(); }
     });
     applyPreset = (name) => {
       Object.assign(state, PRESETS[name]);

@@ -25,7 +25,7 @@ python3 -m http.server 8000
 | 굴절 | 굴절 강도 · 베젤 · 색수차 · 흐림 · 반경을 바꾸며 생성되는 SVG 필터 코드와 변위 맵 보기 |
 | 광학 | 스넬의 법칙 도해에서 빛줄기를 끌고 굴절률을 바꿔 굴절각 · 밀림 거리 · 프레넬 반사율 읽기 |
 | 인터랙션 | 유리로 변하는 세그먼트 컨트롤 · 스위치 · 슬라이더, 페이지 전체에 적용되는 스프링 곡선 |
-| 사용 경험 | 휴대폰 화면 4종: 줄어드는 탭 바, 떠 있는 내비게이션 버튼, 제어 센터, 알림 묶음 |
+| 사용 경험 | 스크롤하면 줄어드는 탭 바, 떠 있는 내비게이션 버튼을 직접 조작하고, Apple 공식 제어 센터 · 잠금 화면 이미지와 비교 |
 | 직접 만들기 | 프리셋 · 모양 · 배경 · 광학 · 표면 값을 바꾸고 **동작하는 HTML 파일 전체를 복사** |
 | 성능 | 유리 개수와 방식(굴절 / 블러 / 없음)을 바꾸며 이 기기의 fps 측정 |
 | 비교 | 리퀴드 글래스 · 글래스모피즘 · iOS 7 반투명 비교, 각 스타일로 빌더 열기 |
@@ -51,6 +51,7 @@ index.html      페이지 마크업
 css/style.css   디자인 토큰, 유리 컴포넌트, 섹션 스타일
 js/glass.js     굴절 엔진 (변위 맵 생성 + SVG 필터 연결)
 js/main.js      섹션별 인터랙션
+assets/         Apple 공식 화면 이미지, 배경 일러스트
 ```
 
 `glass.js`는 다른 프로젝트에서도 쓸 수 있습니다.
@@ -75,4 +76,4 @@ js/main.js      섹션별 인터랙션
 - [Apple Human Interface Guidelines · Materials](https://developer.apple.com/design/human-interface-guidelines/materials)
 - MDN [`backdrop-filter`](https://developer.mozilla.org/ko/docs/Web/CSS/backdrop-filter), [`feDisplacementMap`](https://developer.mozilla.org/en-US/docs/Web/SVG/Element/feDisplacementMap)
 
-Apple, iPhone, Liquid Glass는 Apple Inc.의 상표입니다. 이 저장소는 Apple과 관련이 없는 학습용 데모입니다.
+Apple, iPhone, Liquid Glass는 Apple Inc.의 상표이며, `assets/apple-*.png`는 Apple이 공개한 이미지입니다. 배경 일러스트(`assets/illust-*.jpg`)의 저작권은 각 저작권자에게 있습니다(【推しの子】 © 赤坂アカ×横槍メンゴ／集英社・【推しの子】製作委員会). 이 저장소는 Apple과 관련이 없는 학습용 데모입니다.
