@@ -7,7 +7,9 @@
  * 3. backdrop-filter: url(#필터) 로 요소 뒤의 화면에 필터를 겁니다.
  *
  * SVG 필터를 backdrop-filter에 쓰는 기능은 Chromium 계열 브라우저에서만 동작합니다.
- * 그 밖의 브라우저에서는 CSS에 적어 둔 blur() 대체 스타일이 그대로 보입니다.
+ * Safari(아이패드·아이폰의 모든 브라우저 포함)와 Firefox에서는 '거울' 방식을 씁니다.
+ * 유리 뒤에 있는 요소(mirror 옵션)를 복제해 유리 안에 같은 위치로 깔고,
+ * 그 복제본에 일반 filter: url(#필터)를 겁니다. 거울 대상이 없는 유리는 blur() 대체 스타일로 보입니다.
  */
 (function (global) {
   'use strict';
@@ -19,7 +21,10 @@
   let defs = null;
   let uid = 0;
 
-  const supported = (() => {
+  // 주소에 ?lg=mirror 를 붙이면 Chromium에서도 거울 방식을 시험해 볼 수 있습니다
+  const forceMirror = /[?&]lg=mirror\b/.test(location.search);
+
+  const supported = !forceMirror && (() => {
     try {
       const brands = navigator.userAgentData && navigator.userAgentData.brands;
       if (!brands || !brands.some((b) => /Chrom|Edge|Opera|Brave/i.test(b.brand))) return false;
@@ -27,6 +32,10 @@
     } catch (e) {
       return false;
     }
+  })();
+
+  const mirrorSupported = !supported && (() => {
+    try { return CSS.supports('filter', 'url(#lg)'); } catch (e) { return false; }
   })();
 
   function ensureDefs() {
@@ -144,6 +153,48 @@
     return (pretty ? '  ' : '') + out.join(nl);
   }
 
+  /* ---------- 거울 방식 (Safari · Firefox) ---------- */
+  const mirrors = new Set();
+  let mirrorRaf = 0;
+
+  // 매 프레임 화면에 보이는 거울만 위치·스크롤을 맞춥니다 (이동, CSS 애니메이션, 스크롤을 모두 따라감)
+  function mirrorLoop() {
+    mirrorRaf = 0;
+    let any = false;
+    for (const g of mirrors) {
+      if (!g._mirrorVisible) continue;
+      any = true;
+      g.syncMirror();
+    }
+    if (any) mirrorRaf = requestAnimationFrame(mirrorLoop);
+  }
+  function kickMirrors() {
+    if (!mirrorRaf) mirrorRaf = requestAnimationFrame(mirrorLoop);
+  }
+  const mirrorIO = typeof IntersectionObserver === 'function'
+    ? new IntersectionObserver((entries) => {
+        for (const en of entries) {
+          const g = en.target.__glass;
+          if (g) g._mirrorVisible = en.isIntersecting;
+        }
+        kickMirrors();
+      }, { rootMargin: '100px' })
+    : null;
+
+  // el이 root 안에서 몇 번째 자식을 따라 내려가는지 기록해 복제본에서 같은 요소를 찾습니다
+  function pathFrom(root, el) {
+    const path = [];
+    for (let n = el; n && n !== root; n = n.parentElement) {
+      path.unshift(Array.prototype.indexOf.call(n.parentElement.children, n));
+    }
+    return path;
+  }
+  function follow(root, path) {
+    let n = root;
+    for (const i of path) n = n && n.children[i];
+    return n;
+  }
+
   const ro = typeof ResizeObserver === 'function'
     ? new ResizeObserver((entries) => {
         for (const entry of entries) if (entry.target.__glass) entry.target.__glass.schedule();
@@ -154,6 +205,8 @@
     constructor(el, opts) {
       this.el = el;
       this.opts = Object.assign({}, DEFAULTS, opts);
+      this.mirrorSource = mirrorSupported && this.opts.mirror ? this.opts.mirror : null;
+      delete this.opts.mirror;
       this.id = 'lg-' + ++uid;
       this.mapURL = '';
       this.size = { w: 0, h: 0, r: 0, bezel: 0 };
@@ -170,12 +223,14 @@
       this.filter = f;
 
       el.__glass = this;
+      if (this.mirrorSource) this.buildMirror();
       this.render();
       this.apply();
       if (ro) ro.observe(el);
     }
 
     set(next) {
+      if (next && 'mirror' in next) { next = Object.assign({}, next); delete next.mirror; }
       Object.assign(this.opts, next);
       this.render();
       this.apply();
@@ -188,14 +243,114 @@
       return this;
     }
 
+    get mode() {
+      if (!this.opts.active || this.opts.refraction <= 0) return 'none';
+      if (supported) return 'backdrop';
+      return this.mirrorSource ? 'mirror' : 'none';
+    }
+
     get refracting() {
-      return supported && this.opts.active && this.opts.refraction > 0;
+      return this.mode !== 'none';
     }
 
     apply() {
-      const on = this.refracting;
-      this.el.style.backdropFilter = on ? `url(#${this.id})` : '';
-      this.el.classList.toggle('lg-refract', on);
+      const mode = this.mode;
+      this.el.style.backdropFilter = mode === 'backdrop' ? `url(#${this.id})` : '';
+      this.el.classList.toggle('lg-refract', mode !== 'none');
+      this.el.classList.toggle('lg-mirror-on', mode === 'mirror');
+      if (this.mirrorWrap) {
+        this.mirrorWrap.hidden = mode !== 'mirror';
+        if (mode === 'mirror') this.syncMirror();
+      }
+    }
+
+    buildMirror() {
+      // 바깥 span이 둥근 모서리로 자르고, 안쪽 span에 필터를 겁니다.
+      // 같은 요소에 걸면 모서리 밖 픽셀이 굴절되어 들어와 네모난 가장자리가 생깁니다.
+      const wrap = document.createElement('span');
+      wrap.className = 'lg-mirror';
+      wrap.setAttribute('aria-hidden', 'true');
+      const lens = document.createElement('span');
+      lens.className = 'lg-mirror__lens';
+      lens.style.filter = `url(#${this.id})`;
+      wrap.appendChild(lens);
+      this.el.prepend(wrap);
+      this.mirrorWrap = wrap;
+      this.mirrorLens = lens;
+      this.reclone();
+
+      // 뒤쪽 내용이 바뀌면(배경 교체, 사진 추가 등) 복제본을 다시 만듭니다
+      let t = 0;
+      this._mo = new MutationObserver((list) => {
+        const relevant = list.some((m) => {
+          const n = m.target.nodeType === 1 ? m.target : m.target.parentElement;
+          return n && !this.el.contains(n) && !n.closest('.lg-mirror');
+        });
+        if (!relevant) return;
+        clearTimeout(t);
+        t = setTimeout(() => this.reclone(), 60);
+      });
+      this._mo.observe(this.mirrorSource, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class', 'style', 'src', 'hidden'] });
+      mirrors.add(this);
+      if (mirrorIO) mirrorIO.observe(this.el);
+      else this._mirrorVisible = true;
+      kickMirrors();
+    }
+
+    reclone() {
+      const src = this.mirrorSource;
+      const clone = src.cloneNode(true);
+      const self = follow(clone, pathFrom(src, this.el));
+      if (self) self.remove();
+      clone.querySelectorAll('.lg-mirror').forEach((n) => n.remove());
+      clone.removeAttribute('id');
+      clone.querySelectorAll('[id]').forEach((n) => n.removeAttribute('id'));
+      clone.setAttribute('inert', '');
+      clone.classList.add('lg-mirror__src');
+      Object.assign(clone.style, {
+        position: 'absolute',
+        left: '0px',
+        top: '0px',
+        margin: '0px',
+        width: src.offsetWidth + 'px',
+        height: src.offsetHeight + 'px',
+        transform: 'none',
+        pointerEvents: 'none',
+      });
+      this.mirrorLens.replaceChildren(clone);
+      this.mirrorClone = clone;
+      this._scrollers = [Array.from(src.querySelectorAll('.scroller')), Array.from(clone.querySelectorAll('.scroller'))];
+      this._mirrorPos = '';
+      this.syncMirror();
+    }
+
+    // 유리의 '변형 전' 위치를 중심점으로 구해, 복제본을 원본과 정확히 겹치도록 옮깁니다
+    syncMirror() {
+      if (!this.mirrorClone || this.mirrorWrap.hidden) return;
+      const src = this.mirrorSource;
+      const el = this.el;
+      const sr = src.getBoundingClientRect();
+      const er = el.getBoundingClientRect();
+      if (!er.width) return;
+      const kx = er.width / el.offsetWidth || 1;
+      const ky = er.height / el.offsetHeight || 1;
+      const ex = er.left + er.width / 2 - (el.offsetWidth * kx) / 2;
+      const ey = er.top + er.height / 2 - (el.offsetHeight * ky) / 2;
+      const dx = (sr.left - ex) / kx;
+      const dy = (sr.top - ey) / ky;
+      const pos = dx.toFixed(1) + ',' + dy.toFixed(1);
+      if (pos !== this._mirrorPos) {
+        this._mirrorPos = pos;
+        this.mirrorClone.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px)`;
+      }
+      if (src.offsetWidth + 'px' !== this.mirrorClone.style.width) {
+        this.mirrorClone.style.width = src.offsetWidth + 'px';
+        this.mirrorClone.style.height = src.offsetHeight + 'px';
+      }
+      const [from, to] = this._scrollers;
+      for (let i = 0; i < from.length; i++) {
+        if (to[i] && to[i].scrollTop !== from[i].scrollTop) to[i].scrollTop = from[i].scrollTop;
+      }
     }
 
     schedule() {
@@ -232,6 +387,10 @@
 
     destroy() {
       if (ro) ro.unobserve(this.el);
+      if (this._mo) this._mo.disconnect();
+      if (mirrorIO) mirrorIO.unobserve(this.el);
+      mirrors.delete(this);
+      if (this.mirrorWrap) this.mirrorWrap.remove();
       this.el.style.backdropFilter = '';
       this.el.classList.remove('lg-refract');
       this.filter.remove();
@@ -241,8 +400,13 @@
 
   global.LiquidGlass = {
     supported,
+    mirrorSupported,
     DEFAULTS,
     drawMap,
+    // 끌어서 옮긴 직후처럼 즉시 맞춰야 할 때 부릅니다 (거울 방식에서만 의미가 있음)
+    sync(el) {
+      if (el && el.__glass && el.__glass.mirrorClone) el.__glass.syncMirror();
+    },
     attach(el, opts) {
       if (!el) return null;
       return el.__glass ? el.__glass.set(opts || {}) : new Glass(el, opts);

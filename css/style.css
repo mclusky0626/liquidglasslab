@@ -408,6 +408,24 @@ code { font-size: .88em; }
   --g-shadow: 0 8px 24px rgb(0 0 0 / .12);
 }
 
+/* 거울 방식 (Safari · Firefox): 유리 뒤 내용을 복제해 유리 안에서 굴절시킵니다 */
+.lg-mirror {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.lg-mirror__lens { position: absolute; inset: 0; }
+.lg-mirror-on { -webkit-backdrop-filter: none; backdrop-filter: none; }
+/* 복제본이 다시 만들어질 때 등장 애니메이션이 처음부터 재생되지 않게 합니다 */
+.lg-mirror__src .hero__name,
+.lg-mirror__src .hero__tagline,
+.lg-mirror__src .hero__sub,
+.lg-mirror__src .hero__cta,
+.lg-mirror__src.viewer { animation: none; }
+
 /* 레이어 끄기 (구조 섹션 토글) */
 .no-base { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 .no-fresnel::before { opacity: 0; }
@@ -1753,6 +1771,293 @@ code { font-size: .88em; }
 .xp__shot[data-screen="control"] { --shot-w: 308px; }
 .xp__shot[data-screen="notify"] { --shot-w: 412px; }
 
+/* Apple 화면 위에 얹은 조작: 좌표는 원본 이미지 픽셀(--iw 기준)로 적고 --u로 환산합니다 */
+.shot {
+  position: relative;
+  container-type: inline-size;
+  --u: calc(100cqw / var(--iw));
+  user-select: none;
+  -webkit-user-select: none;
+}
+.shot__img { display: block; width: 100%; height: auto; }
+.hot {
+  position: absolute;
+  left: calc((var(--x) - var(--d) / 2) * var(--u));
+  top: calc((var(--y) - var(--d) / 2) * var(--u));
+  width: calc(var(--d) * var(--u));
+  height: calc(var(--d) * var(--u));
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hot--rect {
+  left: calc(var(--x0) * var(--u));
+  top: calc(var(--y0) * var(--u));
+  width: calc(var(--w) * var(--u));
+  height: calc(var(--h) * var(--u));
+  border-radius: calc(var(--r, 0) * var(--u));
+}
+.hot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgb(255 255 255 / 0);
+  transition: background-color .35s var(--ease);
+  pointer-events: none;
+}
+.hot:active::after { background: rgb(255 255 255 / .22); transition-duration: .05s; }
+.hot:focus-visible { outline-offset: 2px; }
+.hot__face {
+  position: absolute;
+  left: calc((var(--fx) - var(--fd) / 2) * var(--u));
+  top: calc((var(--fy) - var(--fd) / 2) * var(--u));
+  width: calc(var(--fd) * var(--u));
+  height: calc(var(--fd) * var(--u));
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--fg, #fff);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .3), inset 0 0 0 .5px rgb(255 255 255 / .18);
+  opacity: 0;
+  transform: scale(.82);
+  transition: opacity .2s var(--ease), transform .45s var(--spring);
+  pointer-events: none;
+}
+.hot__face--rect { border-radius: calc(4 * var(--u)); box-shadow: none; }
+.hot__face svg { width: 56%; height: 56%; }
+.hot.is-flipped .hot__face { opacity: 1; transform: none; }
+
+.hot-slider {
+  position: absolute;
+  left: calc(var(--x0) * var(--u));
+  top: calc(var(--y0) * var(--u));
+  width: calc(var(--w) * var(--u));
+  height: calc(var(--h) * var(--u));
+  overflow: hidden;
+  border-radius: calc(var(--w) / 2 * var(--u));
+  /* 막대의 빈 윗부분을 원본에서 잘라 세로로 늘려 씁니다 */
+  background-image: url("../assets/apple-control-center.png");
+  background-size: calc(450 * var(--u)) calc(920 * var(--u) * var(--sk));
+  background-position: calc(var(--x0) * -1 * var(--u)) calc(var(--y0) * -1 * var(--u) * var(--sk));
+  cursor: ns-resize;
+  touch-action: none;
+}
+.hot-slider__fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(#e9e5e1, #f4f2ef);
+  transform-origin: bottom;
+  transform: scaleY(var(--vr, .5));
+}
+.hot-slider svg {
+  position: absolute;
+  left: 50%;
+  bottom: calc(23 * var(--u));
+  width: calc(26 * var(--u));
+  height: calc(26 * var(--u));
+  translate: -50% 0;
+  color: #fff;
+  transition: color .2s var(--ease);
+}
+.hot-slider.is-covered svg { color: var(--icon-on); }
+
+/* 잠금 화면: 펼친 알림 */
+.shot__dim {
+  position: absolute;
+  left: calc(97 * var(--u));
+  top: calc(12 * var(--u));
+  width: calc(408 * var(--u));
+  height: calc(882 * var(--u));
+  border-radius: calc(56 * var(--u));
+  background: rgb(0 0 0 / .32);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s var(--ease);
+}
+.shot.is-sheet .shot__dim { opacity: 1; pointer-events: auto; }
+.lock-card {
+  position: absolute;
+  left: calc(var(--x0) * var(--u));
+  top: calc(var(--y0) * var(--u));
+  width: calc(var(--w) * var(--u));
+  height: calc(var(--h) * var(--u));
+  padding: 0;
+  border: 0;
+  border-radius: calc(20 * var(--u));
+  background: url("../assets/apple-notifications.png") no-repeat;
+  background-size: calc(602 * var(--u)) calc(920 * var(--u));
+  background-position: calc(var(--x0) * -1 * var(--u)) calc(var(--y0) * -1 * var(--u));
+  opacity: 0;
+  cursor: pointer;
+  transition: transform .5s var(--spring), opacity .2s var(--ease);
+  -webkit-tap-highlight-color: transparent;
+}
+.lock-card:active { opacity: 1; transform: scale(1.035); transition-duration: .2s; }
+.lock-card:focus-visible { opacity: 1; outline-offset: 2px; }
+.lock-sheet {
+  --g-tint: rgb(40 36 34 / .28);
+  --g-hi: .55;
+  --g-blur: 18px;
+  position: absolute;
+  left: calc(110 * var(--u));
+  width: calc(382 * var(--u));
+  top: calc(470 * var(--u));
+  padding: calc(16 * var(--u));
+  border-radius: calc(28 * var(--u));
+  color: #fff;
+  display: grid;
+  gap: calc(12 * var(--u));
+  opacity: 0;
+  transform: translateY(calc(24 * var(--u))) scale(.94);
+  pointer-events: none;
+  transition: opacity .25s var(--ease), transform .55s var(--spring);
+}
+.shot.is-sheet .lock-sheet { opacity: 1; transform: none; pointer-events: auto; }
+.lock-sheet__head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: calc(10 * var(--u)); align-items: center; }
+.lock-sheet__icon {
+  width: calc(38 * var(--u));
+  height: calc(38 * var(--u));
+  border-radius: calc(9 * var(--u));
+  background: url("../assets/apple-notifications.png") no-repeat;
+  background-size: calc(602 * var(--u)) calc(920 * var(--u));
+  background-position: calc(-127.5 * var(--u)) calc(-467.5 * var(--u));
+}
+.lock-sheet__title { margin: 0; font-size: calc(15 * var(--u)); font-weight: 700; }
+.lock-sheet__time { font-size: calc(12 * var(--u)); color: rgb(255 255 255 / .75); }
+.lock-sheet__msg { margin: 0; font-size: calc(14 * var(--u)); line-height: 1.4; color: rgb(255 255 255 / .92); }
+.lock-sheet__actions { display: grid; gap: 1px; border-radius: calc(16 * var(--u)); overflow: hidden; }
+.lock-sheet__actions button {
+  padding: calc(11 * var(--u)) calc(14 * var(--u));
+  border: 0;
+  background: rgb(255 255 255 / .14);
+  color: #fff;
+  font-size: calc(14 * var(--u));
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.lock-sheet__actions button:hover { background: rgb(255 255 255 / .24); }
+.lock-sheet__actions button:last-child { color: #ff6961; }
+.lock-btn {
+  --g-tint: rgb(30 30 34 / .22);
+  --g-hi: .55;
+  --g-blur: 8px;
+  position: absolute;
+  left: calc((var(--x) - 27) * var(--u));
+  top: calc((var(--y) - 27) * var(--u));
+  width: calc(54 * var(--u));
+  height: calc(54 * var(--u));
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  cursor: pointer;
+  transition: transform .45s var(--spring), background-color .2s var(--ease), color .2s var(--ease);
+}
+.lock-btn svg { width: 44%; height: 44%; }
+.lock-btn:active { transform: scale(1.18); }
+.lock-btn[aria-pressed="true"] { --g-tint: rgb(255 255 255 / .92); color: #1d1d1f; }
+.lock-glow {
+  position: absolute;
+  left: calc(97 * var(--u));
+  top: calc(12 * var(--u));
+  width: calc(408 * var(--u));
+  height: calc(882 * var(--u));
+  border-radius: calc(56 * var(--u));
+  background: radial-gradient(70% 40% at 50% 0%, rgb(255 250 235 / .35), transparent 70%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .4s var(--ease);
+}
+.shot.is-torch .lock-glow { opacity: 1; }
+
+/* 사진 보기 */
+.photo-grid i { cursor: pointer; }
+.viewer {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: #000;
+  display: grid;
+  place-items: center;
+  animation: viewer-in .35s var(--ease);
+}
+@keyframes viewer-in { from { transform: scale(.92); } to { transform: none; } }
+.viewer__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: opacity .2s var(--ease);
+  touch-action: pan-y;
+}
+.viewer__top {
+  position: absolute;
+  top: 52px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ios-pill {
+  --g-tint: rgb(30 30 30 / .2);
+  --g-hi: .5;
+  --g-blur: 2px;
+  height: 40px;
+  padding: 0 14px 0 10px;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ios-pill svg { width: 20px; height: 20px; }
+.ios-pill--count { padding: 0 14px; font-variant-numeric: tabular-nums; cursor: default; }
+.viewer__bar {
+  --g-tint: rgb(30 30 30 / .2);
+  --g-hi: .5;
+  --g-blur: 2px;
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  width: 64%;
+  height: 54px;
+  translate: -50% 0;
+  border-radius: 999px;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+}
+.viewer__btn {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  cursor: pointer;
+  transition: transform .4s var(--spring), color .2s var(--ease);
+}
+.viewer__btn svg { width: 22px; height: 22px; }
+.viewer__btn:active { transform: scale(.86); }
+.viewer__btn[aria-pressed="true"] { color: #ff375f; }
+
 
 /* ---------- 직접 만들기 ---------- */
 .builder {
@@ -2088,6 +2393,7 @@ code { font-size: .88em; }
   backdrop-filter: none !important;
 }
 .reduce-transparency .glass { background-color: var(--g-solid) !important; }
+.reduce-transparency .lg-mirror { display: none; }
 .reduce-transparency .glass.seg__pill,
 .reduce-transparency .glass.gswitch__thumb { background-color: transparent !important; }
 .reduce-transparency .localnav { background: var(--night); }

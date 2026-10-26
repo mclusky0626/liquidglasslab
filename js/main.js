@@ -4,8 +4,13 @@
 
   const LG = window.LiquidGlass;
   const root = document.documentElement;
-  const $ = (s, r = document) => r.querySelector(s);
-  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  // 거울 방식(Safari)에서는 유리 안에 화면 복제본이 들어가므로, 복제본 속 요소는 찾지 않습니다
+  const real = (n) => !n.closest('.lg-mirror');
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s)).filter(real);
+  const $ = (s, r = document) => {
+    const n = r.querySelector(s);
+    return !n || real(n) ? n : $$(s, r)[0] || null;
+  };
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const reduced = () => root.classList.contains('reduce-motion');
 
@@ -182,7 +187,11 @@
   /* ---------- 유리 연결 · 동적 조명 ---------- */
   function initGlass() {
     $$('.bg[data-bg]').forEach((layer) => setBg(layer, layer.dataset.bg));
-    $$('[data-refract]').forEach((el) => LG.attach(el, parseOpts(el.dataset.refract)));
+    $$('[data-refract]').forEach((el) => {
+      const opts = parseOpts(el.dataset.refract);
+      if (el.dataset.mirror) opts.mirror = el.closest(el.dataset.mirror);
+      LG.attach(el, opts);
+    });
 
     const lit = $$('[data-lit]');
     let raf = 0;
@@ -244,7 +253,7 @@
     const lens = $('#hero-lens');
     const hint = $('#hero-hint');
     const tagline = $('.hero__tagline', stage);
-    LG.attach(lens, { refraction: 96, bezel: 36, blur: 0.4, dispersion: 0.55, saturation: 1.35 });
+    LG.attach(lens, { refraction: 96, bezel: 36, blur: 0.4, dispersion: 0.55, saturation: 1.35, mirror: stage });
     refreshOnShapeEnd(lens);
 
     const SHAPES = { capsule: [300, 150, 75], circle: [210, 210, 105], card: [330, 210, 46] };
@@ -535,7 +544,7 @@
     const outs = Object.fromEntries(keys.map((k) => [k, $('#lab-' + k + '-val')]));
     let showMap = false;
 
-    if (!LG.supported) $('#lab-note').hidden = false;
+    if (!LG.supported && !LG.mirrorSupported) $('#lab-note').hidden = false;
 
     const read = () => ({
       refraction: +inputs.refraction.value,
@@ -545,7 +554,7 @@
       saturation: 1.5,
     });
     panel.style.borderRadius = inputs.radius.value + 'px';
-    const glass = LG.attach(panel, read());
+    const glass = LG.attach(panel, Object.assign(read(), { mirror: stage }));
 
     function update() {
       panel.style.borderRadius = inputs.radius.value + 'px';
@@ -679,7 +688,7 @@
     const seg = $('#seg');
     const pill = $('#seg-pill');
     const opts = $$('.seg__opt', seg);
-    const glass = LG.attach(pill, { refraction: 46, bezel: 14, blur: 0, dispersion: 0.6, saturation: 1.3, active: false });
+    const glass = LG.attach(pill, { refraction: 46, bezel: 14, blur: 0, dispersion: 0.6, saturation: 1.3, active: false, mirror: seg });
     const PAD = 4;
     const ELASTIC = 8;
     let idx = 0;
@@ -757,7 +766,7 @@
   function initSwitch() {
     const sw = $('#gswitch');
     const thumb = $('#gswitch-thumb');
-    const glass = LG.attach(thumb, { refraction: 40, bezel: 12, blur: 0, dispersion: 0.7, saturation: 1.4, active: false });
+    const glass = LG.attach(thumb, { refraction: 40, bezel: 12, blur: 0, dispersion: 0.7, saturation: 1.4, active: false, mirror: sw });
     let offTimer = 0;
     const press = () => {
       clearTimeout(offTimer);
@@ -785,7 +794,7 @@
     const sl = $('#gslider');
     const track = $('.gslider__track', sl);
     const thumb = $('#gslider-thumb');
-    const glass = LG.attach(thumb, { refraction: 34, bezel: 12, blur: 0, dispersion: 0.6, saturation: 1.3, active: false });
+    const glass = LG.attach(thumb, { refraction: 34, bezel: 12, blur: 0, dispersion: 0.6, saturation: 1.3, active: false, mirror: sl });
     let v = 40;
     let offTimer = 0;
 
@@ -905,18 +914,76 @@
       });
     });
 
-    // 사진 보관함: 일러스트 세 장을 서로 다른 위치와 배율로 잘라 사진처럼 채웁니다
+    // 사진 보관함: 일러스트 열 장. 앞 줄은 사진 전체를, 뒤로 갈수록 확대한 부분을 보여 줍니다
     const grid = $('#photo-grid');
     const frag = document.createDocumentFragment();
-    const ILLUST = ['illust-lineup.jpg', 'illust-underwater.jpg', 'illust-character.jpg'];
-    for (let i = 0; i < 54; i++) {
+    const PHOTOS = ['christmas', 'bkomachi', 'poster', 'lineup', 'kana-akane', 'shikishi', 'silhouette-star', 'underwater', 'silhouette-stage', 'character']
+      .map((n) => `assets/illust-${n}.jpg`);
+    for (let i = 0; i < 30; i++) {
+      const p = i % PHOTOS.length;
+      const zoom = Math.floor(i / PHOTOS.length);
       const tile = document.createElement('i');
-      tile.style.backgroundImage = `url("assets/${ILLUST[i % 3]}")`;
-      tile.style.backgroundSize = 160 + ((i * 7) % 4) * 70 + '%';
-      tile.style.backgroundPosition = `${(i * 37) % 100}% ${(i * 53) % 100}%`;
+      tile.dataset.photo = p;
+      tile.setAttribute('role', 'button');
+      tile.setAttribute('tabindex', '0');
+      tile.setAttribute('aria-label', `사진 ${p + 1} 열기`);
+      tile.style.backgroundImage = `url("${PHOTOS[p]}")`;
+      tile.style.backgroundSize = zoom ? 150 + zoom * 60 + '%' : 'cover';
+      tile.style.backgroundPosition = zoom ? `${(i * 37) % 100}% ${(i * 23) % 60 + 10}%` : 'center 25%';
       frag.appendChild(tile);
     }
     grid.appendChild(frag);
+
+    const viewer = $('#viewer');
+    const vImg = $('#viewer-img');
+    const vCount = $('#viewer-count');
+    const vLike = $('#viewer-like');
+    const liked = new Set();
+    let current = 0;
+    const showPhoto = (i) => {
+      current = (i + PHOTOS.length) % PHOTOS.length;
+      vImg.src = PHOTOS[current];
+      vCount.textContent = `${current + 1} / ${PHOTOS.length}`;
+      vLike.setAttribute('aria-pressed', String(liked.has(current)));
+    };
+    const openViewer = (i) => {
+      showPhoto(i);
+      viewer.hidden = false;
+      $('#viewer-back').focus();
+    };
+    const closeViewer = () => {
+      viewer.hidden = true;
+      const tile = $(`#photo-grid [data-photo="${current}"]`);
+      if (tile) tile.focus({ preventScroll: true });
+    };
+    grid.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-photo]');
+      if (t) openViewer(+t.dataset.photo);
+    });
+    grid.addEventListener('keydown', (e) => {
+      const t = e.target.closest('[data-photo]');
+      if (t && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openViewer(+t.dataset.photo); }
+    });
+    $('#viewer-back').addEventListener('click', closeViewer);
+    $('#viewer-prev').addEventListener('click', () => showPhoto(current - 1));
+    $('#viewer-next').addEventListener('click', () => showPhoto(current + 1));
+    vLike.addEventListener('click', () => {
+      if (liked.has(current)) liked.delete(current);
+      else liked.add(current);
+      vLike.setAttribute('aria-pressed', String(liked.has(current)));
+    });
+    viewer.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeViewer();
+      else if (e.key === 'ArrowLeft') showPhoto(current - 1);
+      else if (e.key === 'ArrowRight') showPhoto(current + 1);
+    });
+    // 옆으로 밀어 넘기기
+    drag(vImg, {
+      threshold: 12,
+      end({ active, dx, dy }) {
+        if (active && Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) showPhoto(current + (dx < 0 ? 1 : -1));
+      },
+    });
 
     const photos = $('#photos-scroller');
     const photosScreen = photos.closest('.screen');
@@ -945,7 +1012,190 @@
       albumScreen.classList.toggle('is-scrolled', album.scrollTop > 250);
     }, { passive: true });
 
+    initControlCenter($('[data-shot="control"]'));
+    initLockScreen($('[data-shot="notify"]'));
     show('tabbar');
+  }
+
+  /* ---------- Apple 화면 위의 조작 ----------
+     좌표는 원본 이미지 픽셀입니다. 켜고 끈 상태는 이미지와 다른 모습(face)을 그 자리에 덮어 보여 줍니다. */
+  const ICONS = {
+    airplane: '<path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5z" fill="currentColor"/>',
+    airdrop: '<g fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M7.8 17.2a6 6 0 1 1 8.4 0"/><path d="M5 20a10 10 0 1 1 14 0"/><path d="M10.4 14.6a2.3 2.3 0 1 1 3.2 0"/></g>',
+    wifi: '<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.2a9.5 9.5 0 0 1 13 0M8.6 15.3a5 5 0 0 1 6.8 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="18.6" r="1.8" fill="currentColor"/>',
+    cell: '<rect x="3" y="15" width="3.6" height="5" rx="1" fill="currentColor"/><rect x="8.2" y="11" width="3.6" height="9" rx="1" fill="currentColor"/><rect x="13.4" y="7" width="3.6" height="13" rx="1" fill="currentColor"/><rect x="18.6" y="3" width="3.4" height="17" rx="1" fill="currentColor"/>',
+    bluetooth: '<path d="M7 7.5l10 9-5 4.5V3l5 4.5-10 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+    link: '<g fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M10 14a4 4 0 0 1 0-5.6l2.4-2.4a4 4 0 0 1 5.6 5.6l-1.2 1.2"/><path d="M14 10a4 4 0 0 1 0 5.6L11.6 18A4 4 0 0 1 6 12.4l1.2-1.2"/></g>',
+    globe: '<g fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.8 2.6 15.2 0 18M12 3c-2.6 2.8-2.6 15.2 0 18"/></g>',
+    bell: '<path d="M12 3a6 6 0 0 0-6 6v4.2L4.3 16a.8.8 0 0 0 .7 1.2h14a.8.8 0 0 0 .7-1.2L18 13.2V9a6 6 0 0 0-6-6zM9.5 19a2.5 2.5 0 0 0 5 0z" fill="currentColor"/>',
+    moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="currentColor"/>',
+    bulb: '<path d="M12 2.5a6.5 6.5 0 0 0-3.8 11.8c.6.5.8 1 .8 1.7V17h6v-1c0-.7.3-1.2.8-1.7A6.5 6.5 0 0 0 12 2.5zM9 18.5h6V20a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 20z" fill="currentColor"/>',
+    rotation: '<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M17.5 3v4h-4"/></g><rect x="9" y="11" width="6" height="5" rx="1" fill="currentColor"/><path d="M10.2 11V9.6a1.8 1.8 0 0 1 3.6 0" fill="none" stroke="currentColor" stroke-width="1.6"/>',
+    battery: '<rect x="2.5" y="7.5" width="17" height="9" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="4.5" y="9.5" width="11" height="5" rx="1" fill="currentColor"/><rect x="20.5" y="10.5" width="1.6" height="3" rx=".8" fill="currentColor"/>',
+    pause: '<path d="M6.5 4h4v16h-4zM13.5 4h4v16h-4z" fill="currentColor"/>',
+    sun: '<circle cx="12" cy="12" r="4.2" fill="currentColor"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M5.3 18.7L7 17M17 7l1.7-1.7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+    speaker: '<path d="M3.5 9h4l5-4.5v15L7.5 15h-4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.7 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+    flashlight: '<path d="M7.5 2.5h9v3.8l-2.8 3.9V21.5h-3.4V10.2L7.5 6.3z" fill="currentColor"/>',
+    camera: '<path d="M4 7.5h3l1.8-2.5h6.4L17 7.5h3a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1zM12 16.2a3.4 3.4 0 1 0 0-6.8 3.4 3.4 0 0 0 0 6.8z" fill="currentColor" fill-rule="evenodd"/>',
+  };
+  const svg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+  const OFF = 'rgb(140 122 100)';
+
+  function hotspot(shot, c) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'hot' + (c.rect ? ' hot--rect' : '');
+    b.setAttribute('aria-label', c.label);
+    const vars = c.rect
+      ? { '--x0': c.rect[0], '--y0': c.rect[1], '--w': c.rect[2], '--h': c.rect[3], '--r': c.rect[4] || 0 }
+      : { '--x': c.x, '--y': c.y, '--d': c.d };
+    const f = c.face;
+    if (f) {
+      Object.assign(vars, { '--fx': f.x ?? c.x, '--fy': f.y ?? c.y, '--fd': f.d ?? c.d });
+      // 사각형 단추 안의 face 좌표는 단추 기준이 아니라 이미지 기준이므로 단추 위치만큼 빼 줍니다
+      if (c.rect) { vars['--fx'] -= c.rect[0]; vars['--fy'] -= c.rect[1]; }
+      else { vars['--fx'] -= c.x - c.d / 2; vars['--fy'] -= c.y - c.d / 2; }
+      b.innerHTML = `<span class="hot__face${f.square ? ' hot__face--rect' : ''}" style="--bg:${f.bg};--fg:${f.fg || '#fff'}">${svg(f.icon)}</span>`;
+    }
+    Object.entries(vars).forEach(([k, v]) => b.style.setProperty(k, v));
+    if (c.toggle) {
+      b.setAttribute('aria-pressed', String(c.on));
+      b.addEventListener('click', () => {
+        const flipped = b.classList.toggle('is-flipped');
+        b.setAttribute('aria-pressed', String(c.on !== flipped));
+      });
+    }
+    shot.appendChild(b);
+    return b;
+  }
+
+  function initControlCenter(shot) {
+    const T = true;
+    [
+      { label: '에어플레인 모드', x: 103.5, y: 196, d: 57, toggle: T, on: false, face: { bg: '#ff9f0a', icon: 'airplane' } },
+      { label: 'AirDrop', x: 172.5, y: 196, d: 57, toggle: T, on: false, face: { bg: '#0a84ff', icon: 'airdrop' } },
+      { label: 'Wi-Fi', x: 103.5, y: 267.5, d: 57, toggle: T, on: true, face: { bg: OFF, icon: 'wifi' } },
+      { label: '셀룰러 데이터', x: 158, y: 252, d: 26, toggle: T, on: true, face: { bg: OFF, icon: 'cell' } },
+      { label: 'Bluetooth', x: 190, y: 252, d: 26, toggle: T, on: true, face: { bg: OFF, icon: 'bluetooth' } },
+      { label: '개인용 핫스팟', x: 158, y: 284, d: 26, toggle: T, on: false, face: { bg: '#30d158', icon: 'link' } },
+      { label: 'VPN', x: 190, y: 284, d: 26, toggle: T, on: false, face: { bg: '#0a84ff', icon: 'globe' } },
+      { label: 'AirPlay', x: 352.5, y: 187.5, d: 32 },
+      { label: '이전 곡', x: 266, y: 286, d: 30 },
+      { label: '재생', rect: [295, 271, 31, 30, 4], toggle: T, on: false, face: { x: 310.5, y: 286, d: 30, bg: 'rgb(97 91 88)', icon: 'pause', square: T } },
+      { label: '다음 곡', x: 355, y: 286, d: 30 },
+      { label: '카메라', x: 96, y: 361, d: 70 },
+      { label: '무음 모드', x: 181, y: 361, d: 70, toggle: T, on: true, face: { bg: OFF, icon: 'bell' } },
+      { label: '집중 모드', rect: [61, 412.5, 155, 70, 35], toggle: T, on: false, face: { x: 95, y: 447.5, d: 40, bg: '#5e5ce6', icon: 'moon' } },
+      { label: '손전등', rect: [61, 499, 155, 153.5, 32], toggle: T, on: false, face: { x: 95, y: 530, d: 40, bg: '#f5f5f7', fg: '#1d1d1f', icon: 'bulb' } },
+      { label: '화면 방향 고정', x: 268, y: 532.5, d: 70, toggle: T, on: false, face: { bg: '#f5f5f7', fg: '#ff3b30', icon: 'rotation' } },
+      { label: '화면 미러링', x: 353, y: 532.5, d: 70 },
+      { label: '저전력 모드', x: 268, y: 617.5, d: 70, toggle: T, on: false, face: { bg: '#f5f5f7', fg: '#e5a400', icon: 'battery' } },
+    ].forEach((c) => hotspot(shot, c));
+
+    // 밝기·음량: 원본 막대 위에 같은 모양의 막대를 덮고 끌어서 조절합니다
+    [
+      { label: '밝기', x0: 233, w: 70, fillTop: 369, icon: 'sun', color: '#ffcc00' },
+      { label: '음량', x0: 318.5, w: 69.5, fillTop: 426, icon: 'speaker', color: '#00c0e8' },
+    ].forEach((c) => {
+      const y0 = 326;
+      const h = 155;
+      const el = document.createElement('div');
+      el.className = 'hot-slider';
+      el.setAttribute('role', 'slider');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', c.label);
+      el.setAttribute('aria-valuemin', '0');
+      el.setAttribute('aria-valuemax', '100');
+      const sk = h / (c.fillTop - y0);
+      Object.entries({ '--x0': c.x0, '--y0': y0, '--w': c.w, '--h': h, '--sk': sk.toFixed(3), '--icon-on': c.color })
+        .forEach(([k, v]) => el.style.setProperty(k, v));
+      el.innerHTML = `<span class="hot-slider__fill"></span>${svg(c.icon)}`;
+      const set = (v) => {
+        v = clamp(Math.round(v), 0, 100);
+        el.style.setProperty('--vr', (v / 100).toFixed(3));
+        el.setAttribute('aria-valuenow', String(v));
+        el.classList.toggle('is-covered', v > 26);
+      };
+      set(((y0 + h - c.fillTop) / h) * 100);
+      drag(el, {
+        start() { return { v0: +el.getAttribute('aria-valuenow'), h: el.offsetHeight }; },
+        move({ dy, ctx }) { set(ctx.v0 - (dy / ctx.h) * 100); },
+      });
+      el.addEventListener('keydown', (e) => {
+        const d = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5 }[e.key];
+        if (!d) return;
+        e.preventDefault();
+        set(+el.getAttribute('aria-valuenow') + d);
+      });
+      shot.appendChild(el);
+    });
+  }
+
+  function initLockScreen(shot) {
+    const dim = document.createElement('div');
+    dim.className = 'shot__dim';
+    const glow = document.createElement('div');
+    glow.className = 'lock-glow';
+    shot.append(glow, dim);
+
+    const cards = [[114, 454, 373.5, 66], [114, 528, 373.5, 66], [114, 602.5, 373.5, 62.5], [114, 682.5, 373.5, 62.5]];
+    const MESSAGES = [
+      '펼친 알림은 이 페이지의 리퀴드 글래스입니다. 가장자리를 따라 잠금 화면의 곡선이 휘어 보입니다.',
+      '두 번째 알림입니다. 바깥을 누르거나 닫기를 누르면 접힙니다.',
+      '겹친 알림 묶음입니다. 실제 iPhone에서는 눌러서 펼치면 같은 앱의 알림이 차례로 나타납니다.',
+      '마지막 알림 묶음입니다. 아래 손전등 버튼도 눌러 보세요.',
+    ];
+    const sheet = document.createElement('div');
+    sheet.className = 'lock-sheet glass';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-label', '펼친 알림');
+    sheet.innerHTML = '<div class="lock-sheet__head"><span class="lock-sheet__icon"></span><p class="lock-sheet__title">Title</p><span class="lock-sheet__time">9:41 AM</span></div><p class="lock-sheet__msg"></p><div class="lock-sheet__actions"><button type="button">읽음으로 표시</button><button type="button">알림 지우기</button></div>';
+    shot.appendChild(sheet);
+
+    let lastCard = null;
+    const close = () => {
+      shot.classList.remove('is-sheet');
+      if (lastCard) lastCard.focus({ preventScroll: true });
+    };
+    cards.forEach((r, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lock-card';
+      b.setAttribute('aria-label', `알림 ${i + 1} 펼치기`);
+      Object.entries({ '--x0': r[0], '--y0': r[1], '--w': r[2], '--h': r[3] }).forEach(([k, v]) => b.style.setProperty(k, v));
+      b.addEventListener('click', () => {
+        lastCard = b;
+        $('.lock-sheet__msg', sheet).textContent = MESSAGES[i];
+        sheet.style.top = `calc(${Math.min(r[1], 560)} * var(--u))`;
+        shot.classList.add('is-sheet');
+        $('button', sheet).focus({ preventScroll: true });
+      });
+      shot.insertBefore(b, dim);
+    });
+    dim.addEventListener('click', close);
+    $$('.lock-sheet__actions button', sheet).forEach((b) => b.addEventListener('click', close));
+    sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+
+    [['손전등', 'flashlight', 150], ['카메라', 'camera', 452]].forEach(([label, icon, x]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'lock-btn glass';
+      b.setAttribute('aria-label', label);
+      b.style.setProperty('--x', x);
+      b.style.setProperty('--y', 838);
+      b.innerHTML = svg(icon);
+      if (icon === 'flashlight') {
+        b.setAttribute('aria-pressed', 'false');
+        b.addEventListener('click', () => {
+          const on = b.getAttribute('aria-pressed') !== 'true';
+          b.setAttribute('aria-pressed', String(on));
+          shot.classList.toggle('is-torch', on);
+        });
+      }
+      shot.insertBefore(b, dim);
+      LG.attach(b, { refraction: 40, bezel: 16, blur: 3, dispersion: 0.35, saturation: 1.6, mirror: shot });
+    });
+    LG.attach(sheet, { refraction: 60, bezel: 22, blur: 4, dispersion: 0.3, saturation: 1.6, mirror: shot });
   }
 
   /* ---------- 직접 만들기 ---------- */
@@ -982,7 +1232,7 @@
     const codeTabs = $$('#code-tabs .chip');
     const codeOut = $('#code-out code');
     const state = Object.assign({ shape: 'card', bg: 'underwater', code: 'html' }, PRESETS.liquid);
-    const glass = LG.attach(el, {});
+    const glass = LG.attach(el, { mirror: stage });
     refreshOnShapeEnd(el);
     const mover = movable(el, stage);
 
